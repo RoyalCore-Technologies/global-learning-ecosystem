@@ -1,8 +1,49 @@
 /**
  * @platform/db
- * Database migration definitions, Supabase clients, and RLS policies.
- * Live credentials and connections will be activated in Milestone 2.
+ * Database migration definitions, Supabase contracts, and RLS metadata for Learnova.
  */
-export const DB_MODULE_VERSION = '0.1.0';
+export const DB_MODULE_VERSION = '0.2.0';
 
-export const ROLE_SECURITY_TRIGGER_FUNCTION = 'prevent_unauthorized_role_assignment';
+export const TABLES = {
+  PROFILES: 'profiles',
+  FOLLOWS: 'follows',
+  CREATOR_CHANNELS: 'creator_channels',
+  CHANNEL_SUBSCRIBERS: 'channel_subscribers',
+  COMMUNITIES: 'communities',
+  COMMUNITY_MEMBERS: 'community_members',
+  POSTS: 'posts',
+  TAGS: 'tags',
+  POST_TAGS: 'post_tags',
+  COMMENTS: 'comments',
+  INTERACTIONS: 'interactions',
+  BOOKMARKS: 'bookmarks',
+  COURSES: 'courses',
+  COURSE_MODULES: 'course_modules',
+  LESSONS: 'lessons',
+  COURSE_ENROLLMENTS: 'course_enrollments',
+  LESSON_PROGRESS: 'lesson_progress',
+  CONVERSATIONS: 'conversations',
+  CONVERSATION_PARTICIPANTS: 'conversation_participants',
+  MESSAGES: 'messages',
+  NOTIFICATIONS: 'notifications',
+  REPORTS: 'reports',
+  SUBSCRIPTIONS: 'subscriptions',
+  CREATOR_PAYOUT_RECORDS: 'creator_payout_records',
+  ROLE_AUDIT_LOGS: 'role_audit_logs',
+  SYSTEM_AUDIT_LOGS: 'system_audit_logs'
+} as const;
+
+export const STORAGE_BUCKETS = {
+  AVATARS: 'avatars',
+  CONTENT_MEDIA: 'content-media',
+  COURSE_MATERIALS: 'course-materials',
+  PROJECT_ARTIFACTS: 'project-artifacts'
+} as const;
+
+export const SECURITY_FUNCTIONS = {
+  PREVENT_UNAUTHORIZED_ROLE_ASSIGNMENT: 'prevent_unauthorized_role_assignment',
+  HANDLE_NEW_USER: 'handle_new_user',
+  IS_PLATFORM_ADMIN: 'is_platform_admin',
+  IS_CONVERSATION_MEMBER: 'is_conversation_member',
+  IS_COMMUNITY_MEMBER: 'is_community_member'
+} as const;
