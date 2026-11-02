@@ -376,9 +376,11 @@ CREATE INDEX IF NOT EXISTS idx_creator_channels_slug ON public.creator_channels(
 CREATE OR REPLACE FUNCTION public.prevent_unauthorized_channel_verification()
 RETURNS TRIGGER AS $$
 DECLARE
+  jwt_claims jsonb;
   jwt_role text;
 BEGIN
-  jwt_role := COALESCE(current_setting('request.jwt.claims', true)::jsonb->>'role', '');
+  jwt_claims := NULLIF(current_setting('request.jwt.claims', true), '')::jsonb;
+  jwt_role := COALESCE(jwt_claims->>'role', '');
   IF (TG_OP = 'INSERT' AND NEW.is_verified = true) OR (TG_OP = 'UPDATE' AND NEW.is_verified IS DISTINCT FROM OLD.is_verified) THEN
     IF (jwt_role <> 'service_role' AND NOT public.is_platform_admin(auth.uid())) THEN
       RAISE EXCEPTION 'Access Denied: Only platform administrators can verify creator channels.'
@@ -912,7 +914,7 @@ CREATE POLICY "profiles_insert_owner_or_service"
   ON public.profiles FOR INSERT
   WITH CHECK (
     auth.uid() = id
-    OR current_setting('request.jwt.claims', true)::jsonb->>'role' = 'service_role'
+    OR (NULLIF(current_setting('request.jwt.claims', true), '')::jsonb->>'role') = 'service_role'
   );
 
 CREATE POLICY "profiles_update_owner"
