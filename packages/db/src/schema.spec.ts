@@ -1,26 +1,30 @@
 import { describe, it, expect } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
-import { TABLES, STORAGE_BUCKETS, SECURITY_FUNCTIONS } from './index.js';
+import { TABLES, STORAGE_BUCKETS, SECURITY_FUNCTIONS, SOCIAL_FUNCTIONS } from './index.js';
 
 describe('Learnova Database Migrations & Safety Suite', () => {
   const migrationsDir = path.resolve(__dirname, '../migrations');
   const migration001Path = path.join(migrationsDir, '001_role_security_policy.sql');
   const migration002Path = path.join(migrationsDir, '002_learnova_master_schema.sql');
   const migration003Path = path.join(migrationsDir, '003_storage_buckets.sql');
+  const migration004Path = path.join(migrationsDir, '004_social_foundation.sql');
 
   it('all migration files exist and are non-empty', () => {
     expect(fs.existsSync(migration001Path)).toBe(true);
     expect(fs.existsSync(migration002Path)).toBe(true);
     expect(fs.existsSync(migration003Path)).toBe(true);
+    expect(fs.existsSync(migration004Path)).toBe(true);
 
     const sql001 = fs.readFileSync(migration001Path, 'utf8');
     const sql002 = fs.readFileSync(migration002Path, 'utf8');
     const sql003 = fs.readFileSync(migration003Path, 'utf8');
+    const sql004 = fs.readFileSync(migration004Path, 'utf8');
 
     expect(sql001.length).toBeGreaterThan(100);
     expect(sql002.length).toBeGreaterThan(1000);
     expect(sql003.length).toBeGreaterThan(500);
+    expect(sql004.length).toBeGreaterThan(500);
   });
 
   it('declares and covers all 26 required platform tables in the master schema', () => {
@@ -63,6 +67,19 @@ describe('Learnova Database Migrations & Safety Suite', () => {
 
     // Verify course-materials is private
     expect(sql003).toContain("'course-materials',\n    'course-materials',\n    false");
+  });
+
+  it('verifies migration 004 implements social functions, notification preferences and triggers', () => {
+    const sql004 = fs.readFileSync(migration004Path, 'utf8');
+
+    Object.values(SOCIAL_FUNCTIONS).forEach((fnName) => {
+      expect(sql004).toContain(fnName);
+    });
+
+    expect(sql004).toContain('notification_preferences');
+    expect(sql004).toContain('is_solution');
+    expect(sql004).toContain('is_pinned');
+    expect(sql004).toContain('idx_posts_fts');
   });
 
   it('guarantees zero payment card columns or sensitive secrets in monetization tables', () => {

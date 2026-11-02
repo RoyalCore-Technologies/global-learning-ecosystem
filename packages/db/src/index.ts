@@ -2,7 +2,7 @@
  * @platform/db
  * Database migration definitions, Supabase contracts, and RLS metadata for Learnova.
  */
-export const DB_MODULE_VERSION = '0.2.0';
+export const DB_MODULE_VERSION = '0.3.0';
 
 export const TABLES = {
   PROFILES: 'profiles',
@@ -48,4 +48,9 @@ export const SECURITY_FUNCTIONS = {
   IS_COMMUNITY_MEMBER: 'is_community_member',
   PREVENT_AUDIT_LOG_TAMPERING: 'prevent_audit_log_tampering',
   BOOTSTRAP_INITIAL_ADMIN: 'bootstrap_initial_admin'
+} as const;
+
+export const SOCIAL_FUNCTIONS = {
+  SYNC_POST_STATS: 'sync_post_stats',
+  CREATE_SOCIAL_NOTIFICATION: 'create_social_notification'
 } as const;
