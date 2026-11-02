@@ -8,7 +8,7 @@ import type { Request } from 'express';
 export interface AuthenticatedUser {
   id: string;
   email?: string;
-  dbRole: string; // Supabase JWT role, e.g. 'authenticated', 'service_role'
+  dbRole: string; // Supabase JWT role, e.g. 'authenticated'
   role: UserRole; // Learnova application role, e.g. 'STUDENT', 'ADMIN'
   app_metadata: Record<string, unknown>;
 }
@@ -30,17 +30,21 @@ export interface SupabaseJwtPayload {
 @Injectable()
 export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
   private jwksSecretProvider: ReturnType<typeof passportJwtSecret> | null = null;
-  private readonly jwtSecret: string;
+  private readonly jwtSecret: string | null;
   private readonly supabaseUrl: string;
+  private readonly expectedIssuer: string | null;
 
   constructor() {
     const supabaseUrl = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || '';
-    const jwtSecret = process.env.SUPABASE_JWT_SECRET || 'dev-fallback-secret-for-testing-only-32chars';
+    const jwtSecret = process.env.SUPABASE_JWT_SECRET || null;
+
+    const normalizedUrl = supabaseUrl.replace(/\/+$/, '');
+    const isPlaceholder = !normalizedUrl || normalizedUrl.includes('placeholder');
+    const expectedIssuer = !isPlaceholder ? `${normalizedUrl}/auth/v1` : null;
 
     // 1. Initialize JWKS provider for asymmetric signing (RS256 / ES256) when Supabase URL is present
     let jwksProvider: ReturnType<typeof passportJwtSecret> | null = null;
-    if (supabaseUrl && !supabaseUrl.includes('placeholder')) {
-      const normalizedUrl = supabaseUrl.replace(/\/+$/, '');
+    if (!isPlaceholder) {
       jwksProvider = passportJwtSecret({
         cache: true,
         rateLimit: true,
@@ -49,10 +53,14 @@ export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
       });
     }
 
+    const allowedAlgorithms: ('RS256' | 'ES256' | 'HS256')[] = ['RS256', 'ES256', 'HS256'];
+
     super({
       jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
       ignoreExpiration: false,
-      algorithms: ['RS256', 'ES256', 'HS256'],
+      algorithms: allowedAlgorithms,
+      audience: 'authenticated',
+      ...(expectedIssuer ? { issuer: expectedIssuer } : {}),
       secretOrKeyProvider: (
         request: Request,
         rawJwtToken: string,
@@ -76,8 +84,22 @@ export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
             return done(new UnauthorizedException('JWT header missing algorithm parameter.'));
           }
 
+          // Algorithm allowlist check
+          if (!allowedAlgorithms.includes(header.alg)) {
+            return done(
+              new UnauthorizedException(`Unsupported or prohibited JWT signing algorithm [${header.alg}].`)
+            );
+          }
+
           // Algorithm dispatch
           if (header.alg === 'HS256') {
+            if (!jwtSecret) {
+              return done(
+                new UnauthorizedException(
+                  'HS256 symmetric signing is not configured on this server (SUPABASE_JWT_SECRET is missing).'
+                )
+              );
+            }
             return done(null, jwtSecret);
           } else if (['RS256', 'ES256'].includes(header.alg)) {
             if (!jwksProvider) {
@@ -101,6 +123,7 @@ export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
 
     this.jwtSecret = jwtSecret;
     this.supabaseUrl = supabaseUrl;
+    this.expectedIssuer = expectedIssuer;
     this.jwksSecretProvider = jwksProvider;
   }
 
@@ -110,21 +133,38 @@ export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
    * 1. Never trusts user_metadata or user_metadata.is_admin for authorization.
    * 2. Distinguishes database role (payload.role) from Learnova application role.
    * 3. Validates subject UUID format and audience.
+   * 4. Enforces 'authenticated' audience and rejects 'service_role' tokens.
+   * 5. Enforces expected issuer when configured.
    */
   async validate(payload: SupabaseJwtPayload): Promise<AuthenticatedUser> {
     if (!payload || !payload.sub) {
       throw new UnauthorizedException('Invalid JWT payload: missing subject identifier (sub).');
     }
 
-    // Verify audience if configured
-    if (payload.aud) {
-      const auds = Array.isArray(payload.aud) ? payload.aud : [payload.aud];
-      if (!auds.includes('authenticated') && !auds.includes('service_role')) {
-        throw new UnauthorizedException(`Invalid token audience: [${payload.aud}].`);
-      }
+    // 1. Strict Audience Validation
+    if (!payload.aud) {
+      throw new UnauthorizedException('Invalid JWT payload: missing audience claim (aud).');
     }
 
-    // Supabase database role (e.g., 'authenticated' or 'service_role')
+    const auds = Array.isArray(payload.aud) ? payload.aud : [payload.aud];
+
+    // 2. Segregate service_role tokens from user endpoints
+    if (auds.includes('service_role') || payload.role === 'service_role') {
+      throw new UnauthorizedException('Service-role tokens cannot be used for user authentication.');
+    }
+
+    if (!auds.includes('authenticated')) {
+      throw new UnauthorizedException(`Invalid token audience: [${payload.aud}]. Required: "authenticated".`);
+    }
+
+    // 3. Strict Issuer Validation (if configured)
+    if (this.expectedIssuer && payload.iss && payload.iss !== this.expectedIssuer) {
+      throw new UnauthorizedException(
+        `Invalid token issuer: expected [${this.expectedIssuer}], received [${payload.iss}].`
+      );
+    }
+
+    // Supabase database role (e.g., 'authenticated')
     const dbRole = payload.role || 'authenticated';
 
     // Application Role Resolution:

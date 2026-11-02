@@ -9,11 +9,12 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { getSupabaseBrowserClient } from '@/lib/supabase/client';
 import { Lock, Mail, ArrowRight, Github, AlertCircle } from 'lucide-react';
+import { sanitizeRedirectUrl } from '@/lib/security/redirect';
 
 function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const nextUrl = searchParams.get('next') || '/dashboard';
+  const nextUrl = sanitizeRedirectUrl(searchParams.get('next'), '/dashboard');
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');

@@ -3,7 +3,7 @@ import { NextResponse, type NextRequest } from 'next/server';
 
 /**
  * Updates the user's session by refreshing expired tokens using cookies,
- * and enforces route protection boundaries.
+ * and enforces strict route protection boundaries with path-segment matching.
  */
 export async function updateSession(request: NextRequest) {
   let response = NextResponse.next({
@@ -45,26 +45,39 @@ export async function updateSession(request: NextRequest) {
     data: { user },
   } = await supabase.auth.getUser();
 
-  const { pathname } = request.nextUrl;
+  const { pathname, search } = request.nextUrl;
 
   // 1. Protected application routes requiring an active authenticated session
-  const protectedRoutes = ['/dashboard', '/creator', '/ai-assistant'];
-  const isProtectedRoute = protectedRoutes.some((route) => pathname.startsWith(route));
+  const protectedRoutes = [
+    '/dashboard',
+    '/creator',
+    '/ai-assistant',
+    '/courses',
+    '/messages',
+    '/notifications',
+    '/bookmarks',
+  ];
+  const isProtectedRoute = protectedRoutes.some(
+    (route) => pathname === route || pathname.startsWith(`${route}/`)
+  );
 
   if (!user && isProtectedRoute) {
     const url = request.nextUrl.clone();
     url.pathname = '/auth/login';
-    url.searchParams.set('next', pathname);
+    url.searchParams.set('next', `${pathname}${search}`);
     return NextResponse.redirect(url);
   }
 
   // 2. Auth routes: authenticated users visiting login/register should be redirected to dashboard
   const authRoutes = ['/auth/login', '/auth/register'];
-  const isAuthRoute = authRoutes.some((route) => pathname.startsWith(route));
+  const isAuthRoute = authRoutes.some(
+    (route) => pathname === route || pathname.startsWith(`${route}/`)
+  );
 
   if (user && isAuthRoute) {
     const url = request.nextUrl.clone();
     url.pathname = '/dashboard';
+    url.search = '';
     return NextResponse.redirect(url);
   }
 

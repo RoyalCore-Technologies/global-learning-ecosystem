@@ -1,11 +1,23 @@
 'use client';
 
 import React, { useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { Sidebar } from './sidebar';
 import { TopNavbar } from './top-navbar';
 import { MobileBottomNav } from './mobile-bottom-nav';
 import { LearnovaLogo } from '@/components/brand/learnova-logo';
-import { X, Sparkles, GraduationCap, Compass, Users, LayoutDashboard, Video, MessageSquare } from 'lucide-react';
+import { getSupabaseBrowserClient } from '@/lib/supabase/client';
+import {
+  X,
+  Sparkles,
+  GraduationCap,
+  Compass,
+  Users,
+  LayoutDashboard,
+  Video,
+  MessageSquare,
+  LogOut,
+} from 'lucide-react';
 import Link from 'next/link';
 
 interface AppShellProps {
@@ -15,6 +27,19 @@ interface AppShellProps {
 
 export function AppShell({ children, rightAside }: AppShellProps) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const router = useRouter();
+
+  const handleSignOut = async () => {
+    try {
+      const supabase = getSupabaseBrowserClient();
+      await supabase.auth.signOut();
+      setMobileMenuOpen(false);
+      router.push('/auth/login');
+      router.refresh();
+    } catch (err) {
+      console.error('[Learnova Auth] Mobile sign out failed:', err);
+    }
+  };
 
   return (
     <div className="min-h-screen bg-surface-base text-slate-100 flex flex-col antialiased">
@@ -105,8 +130,19 @@ export function AppShell({ children, rightAside }: AppShellProps) {
                 </nav>
               </div>
 
-              <div className="pt-6 border-t border-surface-border text-xs text-slate-500">
-                Learnova Platform &middot; Knowledge Over Popularity
+              {/* Drawer Footer with Accessible Mobile Sign Out */}
+              <div className="pt-6 border-t border-surface-border space-y-4">
+                <button
+                  type="button"
+                  onClick={handleSignOut}
+                  className="flex items-center gap-3 w-full px-3 py-2.5 rounded-xl text-sm font-medium text-rose-400 hover:text-rose-300 hover:bg-rose-950/30 transition-colors"
+                >
+                  <LogOut className="w-4 h-4 shrink-0" />
+                  <span>Sign Out</span>
+                </button>
+                <div className="text-[11px] text-slate-500">
+                  Learnova Platform &middot; Knowledge Over Popularity
+                </div>
               </div>
             </div>
           </div>

@@ -1,10 +1,12 @@
 import { NextResponse } from 'next/server';
 import { getSupabaseServerClient } from '@/lib/supabase/server';
+import { sanitizeRedirectUrl } from '@/lib/security/redirect';
 
 export async function GET(request: Request) {
   const { searchParams, origin } = new URL(request.url);
   const code = searchParams.get('code');
-  const next = searchParams.get('next') || '/dashboard';
+  // Enforce open redirect protection on the post-auth landing path
+  const next = sanitizeRedirectUrl(searchParams.get('next'), '/dashboard');
 
   if (code) {
     try {
