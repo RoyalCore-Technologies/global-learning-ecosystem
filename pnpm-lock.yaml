@@ -212,6 +212,9 @@ importers:
       '@platform/types':
         specifier: workspace:*
         version: link:../../packages/types
+      '@supabase/supabase-js':
+        specifier: 2.118.0
+        version: 2.118.0
       class-transformer:
         specifier: ^0.5.1
         version: 0.5.1
