@@ -159,6 +159,20 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER STABLE SET search_path = public, pg_temp;
 
+REVOKE EXECUTE ON FUNCTION public.is_platform_admin(uuid) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.is_platform_admin(uuid) TO postgres;
+DO $$ BEGIN
+  IF EXISTS (SELECT FROM pg_roles WHERE rolname = 'authenticated') THEN
+    GRANT EXECUTE ON FUNCTION public.is_platform_admin(uuid) TO authenticated;
+  END IF;
+  IF EXISTS (SELECT FROM pg_roles WHERE rolname = 'service_role') THEN
+    GRANT EXECUTE ON FUNCTION public.is_platform_admin(uuid) TO service_role;
+  END IF;
+  IF EXISTS (SELECT FROM pg_roles WHERE rolname = 'supabase_admin') THEN
+    GRANT EXECUTE ON FUNCTION public.is_platform_admin(uuid) TO supabase_admin;
+  END IF;
+END $$;
+
 CREATE OR REPLACE FUNCTION public.is_conversation_member(p_conversation_id uuid, p_user_id uuid)
 RETURNS boolean AS $$
 BEGIN
@@ -170,6 +184,20 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER STABLE SET search_path = public, pg_temp;
 
+REVOKE EXECUTE ON FUNCTION public.is_conversation_member(uuid, uuid) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.is_conversation_member(uuid, uuid) TO postgres;
+DO $$ BEGIN
+  IF EXISTS (SELECT FROM pg_roles WHERE rolname = 'authenticated') THEN
+    GRANT EXECUTE ON FUNCTION public.is_conversation_member(uuid, uuid) TO authenticated;
+  END IF;
+  IF EXISTS (SELECT FROM pg_roles WHERE rolname = 'service_role') THEN
+    GRANT EXECUTE ON FUNCTION public.is_conversation_member(uuid, uuid) TO service_role;
+  END IF;
+  IF EXISTS (SELECT FROM pg_roles WHERE rolname = 'supabase_admin') THEN
+    GRANT EXECUTE ON FUNCTION public.is_conversation_member(uuid, uuid) TO supabase_admin;
+  END IF;
+END $$;
+
 CREATE OR REPLACE FUNCTION public.is_community_member(p_community_id uuid, p_user_id uuid)
 RETURNS boolean AS $$
 BEGIN
@@ -180,6 +208,20 @@ BEGIN
   );
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER STABLE SET search_path = public, pg_temp;
+
+REVOKE EXECUTE ON FUNCTION public.is_community_member(uuid, uuid) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.is_community_member(uuid, uuid) TO postgres;
+DO $$ BEGIN
+  IF EXISTS (SELECT FROM pg_roles WHERE rolname = 'authenticated') THEN
+    GRANT EXECUTE ON FUNCTION public.is_community_member(uuid, uuid) TO authenticated;
+  END IF;
+  IF EXISTS (SELECT FROM pg_roles WHERE rolname = 'service_role') THEN
+    GRANT EXECUTE ON FUNCTION public.is_community_member(uuid, uuid) TO service_role;
+  END IF;
+  IF EXISTS (SELECT FROM pg_roles WHERE rolname = 'supabase_admin') THEN
+    GRANT EXECUTE ON FUNCTION public.is_community_member(uuid, uuid) TO supabase_admin;
+  END IF;
+END $$;
 
 -- Timestamp update trigger function
 CREATE OR REPLACE FUNCTION public.update_updated_at_column()
@@ -689,9 +731,10 @@ CREATE INDEX IF NOT EXISTS idx_payout_records_creator ON public.creator_payout_r
 
 CREATE TABLE IF NOT EXISTS public.role_audit_logs (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  -- RESTRICT or standalone UUID preserves forensic evidence even if user account is deleted
+  -- Standalone UUIDs preserve forensic evidence without cascading updates blocking account deletion
   target_user_id uuid NOT NULL,
-  performed_by uuid REFERENCES public.profiles(id) ON DELETE SET NULL,
+  performed_by uuid,
+  performed_by_email text,
   old_role public.user_role NOT NULL,
   new_role public.user_role NOT NULL,
   reason text NOT NULL,
@@ -702,7 +745,8 @@ CREATE INDEX IF NOT EXISTS idx_role_audit_target ON public.role_audit_logs(targe
 
 CREATE TABLE IF NOT EXISTS public.system_audit_logs (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  actor_id uuid REFERENCES public.profiles(id) ON DELETE SET NULL,
+  actor_id uuid,
+  actor_email text,
   action text NOT NULL,
   entity_type text NOT NULL,
   entity_id text,
@@ -737,6 +781,93 @@ DROP TRIGGER IF EXISTS trg_immutable_system_audit ON public.system_audit_logs;
 CREATE TRIGGER trg_immutable_system_audit
   BEFORE UPDATE OR DELETE ON public.system_audit_logs
   FOR EACH ROW EXECUTE FUNCTION public.prevent_audit_log_tampering();
+
+-- Transactional, safe administrator bootstrap provisioning function
+CREATE OR REPLACE FUNCTION public.bootstrap_initial_admin(
+  p_admin_email text,
+  p_reason text DEFAULT 'Initial platform founder/administrator bootstrap provisioning'
+)
+RETURNS uuid AS $$
+DECLARE
+  v_user_id uuid;
+  v_old_role public.user_role;
+  v_jwt_claims jsonb;
+  v_jwt_role text;
+  v_matches_count integer;
+BEGIN
+  -- Strict caller verification: only superuser or service_role can bootstrap an admin
+  v_jwt_claims := NULLIF(current_setting('request.jwt.claims', true), '')::jsonb;
+  v_jwt_role := COALESCE(v_jwt_claims->>'role', '');
+  IF (v_jwt_role <> 'service_role' AND current_user NOT IN ('postgres', 'supabase_admin')) THEN
+    RAISE EXCEPTION 'Access Denied: Only database superusers or service-role can execute bootstrap_initial_admin.'
+      USING ERRCODE = '42501';
+  END IF;
+
+  -- Verify exactly one matching user exists in auth.users
+  SELECT count(*) INTO v_matches_count
+  FROM auth.users
+  WHERE lower(email) = lower(trim(p_admin_email));
+
+  IF v_matches_count = 0 THEN
+    RAISE EXCEPTION 'Bootstrap Failed: User with email [%] does not exist in auth.users.', p_admin_email
+      USING ERRCODE = 'P0002';
+  END IF;
+
+  IF v_matches_count > 1 THEN
+    RAISE EXCEPTION 'Bootstrap Failed: Multiple users found with email [%]. Exactly one intended account must match.', p_admin_email
+      USING ERRCODE = '21000';
+  END IF;
+
+  -- 1. Locate the exact user by email from auth.users
+  SELECT id INTO v_user_id
+  FROM auth.users
+  WHERE lower(email) = lower(trim(p_admin_email));
+
+  -- 2. Fetch existing profile and role
+  SELECT role INTO v_old_role
+  FROM public.profiles
+  WHERE id = v_user_id;
+
+  IF v_old_role IS NULL THEN
+    RAISE EXCEPTION 'Bootstrap Failed: Profile for user [%] does not exist in public.profiles.', v_user_id
+      USING ERRCODE = 'P0002';
+  END IF;
+
+  -- 3. Atomic transaction: role update and audit insertion either both succeed or both fail
+  UPDATE public.profiles
+  SET role = 'ADMIN', verification_status = 'VERIFIED'
+  WHERE id = v_user_id;
+
+  INSERT INTO public.role_audit_logs (
+    target_user_id,
+    performed_by,
+    performed_by_email,
+    old_role,
+    new_role,
+    reason
+  ) VALUES (
+    v_user_id,
+    NULL, -- Bootstrap initialization
+    current_user,
+    v_old_role,
+    'ADMIN',
+    COALESCE(p_reason, 'Initial platform founder/administrator bootstrap provisioning')
+  );
+
+  RETURN v_user_id;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, auth, pg_temp;
+
+REVOKE EXECUTE ON FUNCTION public.bootstrap_initial_admin(text, text) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.bootstrap_initial_admin(text, text) TO postgres;
+DO $$ BEGIN
+  IF EXISTS (SELECT FROM pg_roles WHERE rolname = 'service_role') THEN
+    GRANT EXECUTE ON FUNCTION public.bootstrap_initial_admin(text, text) TO service_role;
+  END IF;
+  IF EXISTS (SELECT FROM pg_roles WHERE rolname = 'supabase_admin') THEN
+    GRANT EXECUTE ON FUNCTION public.bootstrap_initial_admin(text, text) TO supabase_admin;
+  END IF;
+END $$;
 
 -- ==============================================================================
 -- 15. ROW LEVEL SECURITY (RLS) POLICIES — RECURSION-SAFE ZERO-TRUST

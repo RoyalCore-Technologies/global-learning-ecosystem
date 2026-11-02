@@ -45,5 +45,7 @@ export const SECURITY_FUNCTIONS = {
   HANDLE_NEW_USER: 'handle_new_user',
   IS_PLATFORM_ADMIN: 'is_platform_admin',
   IS_CONVERSATION_MEMBER: 'is_conversation_member',
-  IS_COMMUNITY_MEMBER: 'is_community_member'
+  IS_COMMUNITY_MEMBER: 'is_community_member',
+  PREVENT_AUDIT_LOG_TAMPERING: 'prevent_audit_log_tampering',
+  BOOTSTRAP_INITIAL_ADMIN: 'bootstrap_initial_admin'
 } as const;

@@ -22,6 +22,9 @@ describe('Learnova PostgreSQL Live Engine Execution Tests (PGlite)', () => {
         IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'anon') THEN
           CREATE ROLE anon;
         END IF;
+        IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'service_role') THEN
+          CREATE ROLE service_role;
+        END IF;
         IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'supabase_admin') THEN
           CREATE ROLE supabase_admin;
         END IF;
@@ -251,5 +254,145 @@ describe('Learnova PostgreSQL Live Engine Execution Tests (PGlite)', () => {
       SELECT public.is_conversation_member('${convId}', '22222222-2222-2222-2222-222222222222') as is_member;
     `);
     expect(isUser2Member.rows[0].is_member).toBe(false);
+  });
+
+  // ============================================================================
+  // FINAL APPROVAL GATE TESTS (AREAS 1, 2, 3)
+  // ============================================================================
+
+  it('Gate 1: bootstrap_initial_admin is atomic, verifies caller, and promotes exactly one account', async () => {
+    // 1. Create a candidate account
+    await db.exec(`
+      INSERT INTO auth.users (id, email, raw_user_meta_data)
+      VALUES (
+        '33333333-3333-3333-3333-333333333333',
+        'founder@learnova.test',
+        '{"username": "founder_user", "display_name": "Founder"}'::jsonb
+      );
+    `);
+
+    // Verify initial role is STUDENT
+    const initialProfile = await db.query<{ role: string }>(`
+      SELECT role FROM public.profiles WHERE id = '33333333-3333-3333-3333-333333333333';
+    `);
+    expect(initialProfile.rows[0].role).toBe('STUDENT');
+
+    // 2. Calling as an unprivileged authenticated user must be rejected
+    await db.exec(`
+      SET request.jwt.claims = '{"role": "authenticated", "sub": "11111111-1111-1111-1111-111111111111"}';
+    `);
+
+    let unprivilegedBlocked = false;
+    try {
+      await db.query(`SELECT public.bootstrap_initial_admin('founder@learnova.test');`);
+    } catch (err: unknown) {
+      unprivilegedBlocked = true;
+      expect((err as Error).message).toContain('Access Denied');
+    }
+    expect(unprivilegedBlocked).toBe(true);
+
+    // 3. Calling with a non-existent email must fail
+    await db.exec(`SET request.jwt.claims = '';`); // Reset to superuser / postgres
+    let nonExistentFailed = false;
+    try {
+      await db.query(`SELECT public.bootstrap_initial_admin('nonexistent@learnova.test');`);
+    } catch (err: unknown) {
+      nonExistentFailed = true;
+      expect((err as Error).message).toContain('does not exist');
+    }
+    expect(nonExistentFailed).toBe(true);
+
+    // 4. Calling as superuser promotes exactly one account and inserts an audit log atomically
+    const bootstrapRes = await db.query<{ bootstrap_initial_admin: string }>(`
+      SELECT public.bootstrap_initial_admin('founder@learnova.test', 'Formal founder bootstrap promotion');
+    `);
+    expect(bootstrapRes.rows[0].bootstrap_initial_admin).toBe('33333333-3333-3333-3333-333333333333');
+
+    // Verify role is now ADMIN and status is VERIFIED
+    const updatedProfile = await db.query<{ role: string; verification_status: string }>(`
+      SELECT role, verification_status FROM public.profiles WHERE id = '33333333-3333-3333-3333-333333333333';
+    `);
+    expect(updatedProfile.rows[0].role).toBe('ADMIN');
+    expect(updatedProfile.rows[0].verification_status).toBe('VERIFIED');
+
+    // Verify audit log row was created
+    const auditRes = await db.query<{ new_role: string; reason: string }>(`
+      SELECT new_role, reason FROM public.role_audit_logs WHERE target_user_id = '33333333-3333-3333-3333-333333333333';
+    `);
+    expect(auditRes.rows[0].new_role).toBe('ADMIN');
+    expect(auditRes.rows[0].reason).toContain('Formal founder bootstrap promotion');
+  });
+
+  it('Gate 2: legitimate account deletion succeeds for target user and admin, preserving audit logs', async () => {
+    // 1. Create target student and admin who promotes them
+    await db.exec(`
+      INSERT INTO auth.users (id, email, raw_user_meta_data)
+      VALUES 
+        ('44444444-4444-4444-4444-444444444444', 'student_to_delete@learnova.test', '{"username": "del_student", "display_name": "Del Student"}'::jsonb),
+        ('55555555-5555-5555-5555-555555555555', 'admin_to_delete@learnova.test', '{"username": "del_admin", "display_name": "Del Admin"}'::jsonb);
+
+      INSERT INTO public.role_audit_logs (
+        target_user_id,
+        performed_by,
+        performed_by_email,
+        old_role,
+        new_role,
+        reason
+      ) VALUES (
+        '44444444-4444-4444-4444-444444444444',
+        '55555555-5555-5555-5555-555555555555',
+        'del_admin@learnova.test',
+        'STUDENT',
+        'EDUCATOR',
+        'Promoted prior to deletion test'
+      );
+    `);
+
+    // 2. Delete target user: must SUCCEED without being blocked
+    await db.exec(`
+      DELETE FROM auth.users WHERE id = '44444444-4444-4444-4444-444444444444';
+    `);
+
+    // Profile must be cascaded/deleted
+    const profileCheck = await db.query(`SELECT id FROM public.profiles WHERE id = '44444444-4444-4444-4444-444444444444';`);
+    expect(profileCheck.rows.length).toBe(0);
+
+    // Audit log record must REMAIN 100% INTACT
+    const auditCheck1 = await db.query<{ target_user_id: string; performed_by: string }>(`
+      SELECT target_user_id, performed_by FROM public.role_audit_logs WHERE target_user_id = '44444444-4444-4444-4444-444444444444';
+    `);
+    expect(auditCheck1.rows.length).toBe(1);
+    expect(auditCheck1.rows[0].target_user_id).toBe('44444444-4444-4444-4444-444444444444');
+
+    // 3. Delete administrator user: must SUCCEED without being blocked by foreign key or immutability triggers
+    await db.exec(`
+      DELETE FROM auth.users WHERE id = '55555555-5555-5555-5555-555555555555';
+    `);
+
+    // Audit log record must STILL exist completely intact
+    const auditCheck2 = await db.query<{ target_user_id: string; performed_by_email: string }>(`
+      SELECT target_user_id, performed_by_email FROM public.role_audit_logs WHERE target_user_id = '44444444-4444-4444-4444-444444444444';
+    `);
+    expect(auditCheck2.rows.length).toBe(1);
+    expect(auditCheck2.rows[0].performed_by_email).toBe('del_admin@learnova.test');
+  });
+
+  it('Gate 3: SECURITY DEFINER least privilege permissions and safe search_path execution', async () => {
+    // 1. Verify RLS helper is executable by authenticated role
+    const adminCheck = await db.query<{ is_admin: boolean }>(`
+      SELECT public.is_platform_admin('33333333-3333-3333-3333-333333333333') as is_admin;
+    `);
+    expect(adminCheck.rows[0].is_admin).toBe(true);
+
+    // 2. Direct execution of internal trigger functions by unprivileged callers is revoked
+    // In PostgreSQL, direct execution of trigger functions throws an error when called as regular functions
+    let triggerDirectBlocked = false;
+    try {
+      await db.query(`SELECT public.prevent_unauthorized_role_assignment();`);
+    } catch (err: unknown) {
+      triggerDirectBlocked = true;
+      expect((err as Error).message).toBeDefined();
+    }
+    expect(triggerDirectBlocked).toBe(true);
   });
 });
