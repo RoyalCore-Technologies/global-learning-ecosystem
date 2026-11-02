@@ -1,0 +1,16 @@
+{
+  "name": "@prajeeth/db",
+  "version": "0.1.0",
+  "private": true,
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "clean": "rimraf dist"
+  },
+  "devDependencies": {
+    "@prajeeth/config": "workspace:*",
+    "rimraf": "^6.0.1",
+    "typescript": "^5.8.2"
+  }
+}
