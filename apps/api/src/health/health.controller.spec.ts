@@ -23,7 +23,7 @@ describe('HealthController', () => {
   it('should return service health status with ok', () => {
     const health = controller.check();
     expect(health.status).toBe('ok');
-    expect(health.service).toBe('prajeeth-ecosystem-api');
+    expect(health.service).toBe('platform-api');
     expect(health.uptimeSeconds).toBeGreaterThanOrEqual(0);
     expect(health.timestamp).toBeDefined();
   });

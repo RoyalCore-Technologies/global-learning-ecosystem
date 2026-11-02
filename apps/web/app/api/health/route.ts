@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { ServiceHealth } from '@prajeeth/types';
+import { ServiceHealth } from '@platform/types';
 
 const startTime = Date.now();
 
@@ -8,7 +8,7 @@ export async function GET() {
 
   const health: ServiceHealth = {
     status: 'ok',
-    service: 'prajeeth-ecosystem-web',
+    service: 'platform-web',
     version: '0.1.0',
     timestamp: new Date().toISOString(),
     uptimeSeconds,

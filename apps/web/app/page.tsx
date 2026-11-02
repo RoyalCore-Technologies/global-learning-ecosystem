@@ -6,7 +6,7 @@ export default function Home() {
       <div className="z-10 w-full max-w-5xl flex items-center justify-between font-mono text-sm border-b border-slate-800 pb-6">
         <div className="flex items-center gap-2">
           <span className="h-3 w-3 rounded-full bg-emerald-500 animate-pulse"></span>
-          <p className="font-semibold tracking-wide">PRAJEETH ECOSYSTEM &middot; FOUNDATION ACTIVE</p>
+          <p className="font-semibold tracking-wide">PLATFORM ECOSYSTEM &middot; FOUNDATION ACTIVE</p>
         </div>
         <div className="flex items-center gap-4 text-xs text-slate-400">
           <span>Turborepo Monorepo</span>
@@ -82,7 +82,7 @@ export default function Home() {
       </div>
 
       <footer className="mt-16 text-xs text-slate-500 font-mono">
-        &copy; {new Date().getFullYear()} Prajeeth Global Ecosystem &middot; Zero-Trust Authorization &middot; Milestone 1
+        &copy; {new Date().getFullYear()} Global Learning & Social Ecosystem &middot; Zero-Trust Authorization &middot; Milestone 1
       </footer>
     </main>
   );

@@ -53,9 +53,9 @@ async function bootstrap() {
 
   const port = process.env.PORT || 4000;
   await app.listen(port);
-  console.log(`[Prajeeth API] Server running on port ${port}`);
-  console.log(`[Prajeeth API] Swagger documentation available at http://localhost:${port}/api/docs`);
-  console.log(`[Prajeeth API] Health check probe at http://localhost:${port}/health`);
+  console.log(`[Platform API] Server running on port ${port}`);
+  console.log(`[Platform API] Swagger documentation available at http://localhost:${port}/api/docs`);
+  console.log(`[Platform API] Health check probe at http://localhost:${port}/health`);
 }
 
 bootstrap();

@@ -1,6 +1,6 @@
 import { Controller, Get } from '@nestjs/common';
 import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
-import { ServiceHealth } from '@prajeeth/types';
+import { ServiceHealth } from '@platform/types';
 import { HealthService } from './health.service.js';
 
 @ApiTags('System & Health')

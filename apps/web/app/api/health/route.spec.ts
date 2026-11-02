@@ -8,7 +8,7 @@ describe('Web Health Route (/api/health)', () => {
 
     const body = await response.json();
     expect(body.status).toBe('ok');
-    expect(body.service).toBe('prajeeth-ecosystem-web');
+    expect(body.service).toBe('platform-web');
     expect(body.version).toBe('0.1.0');
     expect(body.uptimeSeconds).toBeGreaterThanOrEqual(0);
     expect(body.timestamp).toBeDefined();

@@ -1,5 +1,5 @@
 {
-  "name": "prajeeth-ecosystem",
+  "name": "platform-monorepo",
   "private": true,
   "packageManager": "pnpm@12.16.1",
   "scripts": {

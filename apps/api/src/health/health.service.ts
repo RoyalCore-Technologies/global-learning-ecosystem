@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { ServiceHealth } from '@prajeeth/types';
+import { ServiceHealth } from '@platform/types';
 
 @Injectable()
 export class HealthService {
@@ -14,7 +14,7 @@ export class HealthService {
 
     return {
       status: 'ok',
-      service: 'prajeeth-ecosystem-api',
+      service: 'platform-api',
       version: '0.1.0',
       timestamp: new Date().toISOString(),
       uptimeSeconds,
