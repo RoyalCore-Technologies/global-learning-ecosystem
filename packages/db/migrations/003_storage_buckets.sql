@@ -127,3 +127,26 @@ CREATE POLICY "course_materials_instructor_upload"
       OR public.is_platform_admin(auth.uid())
     )
   );
+
+-- ------------------------------------------------------------------------------
+-- Project Artifacts Bucket Policies (Public Read, Owner Upload/Delete)
+-- ------------------------------------------------------------------------------
+CREATE POLICY "project_artifacts_public_select"
+  ON storage.objects FOR SELECT
+  USING (bucket_id = 'project-artifacts');
+
+CREATE POLICY "project_artifacts_user_upload"
+  ON storage.objects FOR INSERT
+  TO authenticated
+  WITH CHECK (
+    bucket_id = 'project-artifacts'
+    AND (storage.foldername(name))[1] = auth.uid()::text
+  );
+
+CREATE POLICY "project_artifacts_user_delete"
+  ON storage.objects FOR DELETE
+  TO authenticated
+  USING (
+    bucket_id = 'project-artifacts'
+    AND (storage.foldername(name))[1] = auth.uid()::text
+  );

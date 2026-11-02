@@ -49,8 +49,9 @@ describe('Learnova Database Migrations & Safety Suite', () => {
     });
 
     // Verify SECURITY DEFINER is attached to critical lookup functions
-    expect(sql002).toContain('FUNCTION public.is_platform_admin(p_user_id uuid)\nRETURNS boolean AS $$\n  SELECT EXISTS');
-    expect(sql002).toContain('FUNCTION public.is_conversation_member(p_conversation_id uuid, p_user_id uuid)\nRETURNS boolean AS $$');
+    expect(sql002).toContain('FUNCTION public.is_platform_admin(p_user_id uuid)');
+    expect(sql002).toContain('FUNCTION public.is_conversation_member(p_conversation_id uuid, p_user_id uuid)');
+    expect(sql002).toContain('SECURITY DEFINER STABLE SET search_path = public, pg_temp');
   });
 
   it('provisions all required Supabase storage buckets with size limits and MIME restrictions', () => {

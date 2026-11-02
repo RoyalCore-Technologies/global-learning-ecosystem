@@ -5,9 +5,16 @@
 -- Security: Zero-Trust Row Level Security (RLS) & Server-Controlled Privileges
 -- ==============================================================================
 
--- Enable essential extensions (guaranteed idempotent)
-CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
-CREATE EXTENSION IF NOT EXISTS "pgcrypto";
+-- Enable extensions safely (gen_random_uuid is native in modern PostgreSQL 13+)
+DO $$ BEGIN
+  CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+EXCEPTION WHEN OTHERS THEN null;
+END $$;
+
+DO $$ BEGIN
+  CREATE EXTENSION IF NOT EXISTS "pgcrypto";
+EXCEPTION WHEN OTHERS THEN null;
+END $$;
 
 -- ==============================================================================
 -- 1. ENUMERATED TYPES (DOMAIN CONTRACTS)
@@ -138,35 +145,41 @@ DO $$ BEGIN
 EXCEPTION WHEN duplicate_object THEN null; END $$;
 
 -- ==============================================================================
--- 2. RECURSION-SAFE SECURITY DEFINER UTILITY FUNCTIONS
+-- 2. RECURSION-SAFE SECURITY DEFINER UTILITY FUNCTIONS (WITH FIXED search_path)
 -- Avoids RLS query recursion loops by executing outside the active RLS context
 -- ==============================================================================
 
 CREATE OR REPLACE FUNCTION public.is_platform_admin(p_user_id uuid)
 RETURNS boolean AS $$
-  SELECT EXISTS (
+BEGIN
+  RETURN EXISTS (
     SELECT 1 FROM public.profiles
     WHERE id = p_user_id AND role = 'ADMIN'
   );
-$$ LANGUAGE sql SECURITY DEFINER STABLE;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER STABLE SET search_path = public, pg_temp;
 
 CREATE OR REPLACE FUNCTION public.is_conversation_member(p_conversation_id uuid, p_user_id uuid)
 RETURNS boolean AS $$
-  SELECT EXISTS (
+BEGIN
+  RETURN EXISTS (
     SELECT 1 FROM public.conversation_participants
     WHERE conversation_id = p_conversation_id
       AND user_id = p_user_id
   );
-$$ LANGUAGE sql SECURITY DEFINER STABLE;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER STABLE SET search_path = public, pg_temp;
 
 CREATE OR REPLACE FUNCTION public.is_community_member(p_community_id uuid, p_user_id uuid)
 RETURNS boolean AS $$
-  SELECT EXISTS (
+BEGIN
+  RETURN EXISTS (
     SELECT 1 FROM public.community_members
     WHERE community_id = p_community_id
       AND user_id = p_user_id
   );
-$$ LANGUAGE sql SECURITY DEFINER STABLE;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER STABLE SET search_path = public, pg_temp;
 
 -- Timestamp update trigger function
 CREATE OR REPLACE FUNCTION public.update_updated_at_column()
@@ -175,7 +188,13 @@ BEGIN
   NEW.updated_at = timezone('utc'::text, now());
   RETURN NEW;
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql SET search_path = public, pg_temp;
+
+REVOKE EXECUTE ON FUNCTION public.update_updated_at_column() FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.update_updated_at_column() TO postgres;
+DO $$ BEGIN IF EXISTS (SELECT FROM pg_roles WHERE rolname = 'supabase_admin') THEN
+  GRANT EXECUTE ON FUNCTION public.update_updated_at_column() TO supabase_admin;
+END IF; END $$;
 
 -- ==============================================================================
 -- 3. IDENTITY AND ACCESS CONTROL (PROFILES)
@@ -227,7 +246,7 @@ DECLARE
 BEGIN
   v_raw_role := NEW.raw_user_meta_data->>'role';
   
-  -- Sanitization: only unprivileged onboarding roles can be chosen
+  -- Strict sanitization: only unprivileged onboarding roles can be chosen
   IF v_raw_role IN ('STUDENT', 'BEGINNER') THEN
     v_assigned_role := v_raw_role::public.user_role;
   ELSE
@@ -260,7 +279,13 @@ BEGIN
 
   RETURN NEW;
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp;
+
+REVOKE EXECUTE ON FUNCTION public.handle_new_user() FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.handle_new_user() TO postgres;
+DO $$ BEGIN IF EXISTS (SELECT FROM pg_roles WHERE rolname = 'supabase_admin') THEN
+  GRANT EXECUTE ON FUNCTION public.handle_new_user() TO supabase_admin;
+END IF; END $$;
 
 -- Attach signup trigger to auth.users
 DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
@@ -285,7 +310,7 @@ CREATE INDEX IF NOT EXISTS idx_follows_follower ON public.follows(follower_id);
 CREATE INDEX IF NOT EXISTS idx_follows_following ON public.follows(following_id);
 
 -- ==============================================================================
--- 5. CREATOR CHANNELS & PUBLICATIONS
+-- 5. CREATOR CHANNELS & PUBLICATIONS (WITH VERIFICATION SAFEGUARD)
 -- ==============================================================================
 
 CREATE TABLE IF NOT EXISTS public.creator_channels (
@@ -304,6 +329,34 @@ CREATE TABLE IF NOT EXISTS public.creator_channels (
 
 CREATE INDEX IF NOT EXISTS idx_creator_channels_owner ON public.creator_channels(owner_id);
 CREATE INDEX IF NOT EXISTS idx_creator_channels_slug ON public.creator_channels(slug);
+
+-- Safeguard against self-verification of creator channels
+CREATE OR REPLACE FUNCTION public.prevent_unauthorized_channel_verification()
+RETURNS TRIGGER AS $$
+DECLARE
+  jwt_role text;
+BEGIN
+  jwt_role := COALESCE(current_setting('request.jwt.claims', true)::jsonb->>'role', '');
+  IF (TG_OP = 'INSERT' AND NEW.is_verified = true) OR (TG_OP = 'UPDATE' AND NEW.is_verified IS DISTINCT FROM OLD.is_verified) THEN
+    IF (jwt_role <> 'service_role' AND NOT public.is_platform_admin(auth.uid())) THEN
+      RAISE EXCEPTION 'Access Denied: Only platform administrators can verify creator channels.'
+        USING ERRCODE = '42501';
+    END IF;
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp;
+
+REVOKE EXECUTE ON FUNCTION public.prevent_unauthorized_channel_verification() FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.prevent_unauthorized_channel_verification() TO postgres;
+DO $$ BEGIN IF EXISTS (SELECT FROM pg_roles WHERE rolname = 'supabase_admin') THEN
+  GRANT EXECUTE ON FUNCTION public.prevent_unauthorized_channel_verification() TO supabase_admin;
+END IF; END $$;
+
+DROP TRIGGER IF EXISTS trg_channel_verification_security ON public.creator_channels;
+CREATE TRIGGER trg_channel_verification_security
+  BEFORE INSERT OR UPDATE OF is_verified ON public.creator_channels
+  FOR EACH ROW EXECUTE FUNCTION public.prevent_unauthorized_channel_verification();
 
 CREATE TABLE IF NOT EXISTS public.channel_subscribers (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -439,6 +492,7 @@ CREATE TABLE IF NOT EXISTS public.bookmarks (
 );
 
 CREATE INDEX IF NOT EXISTS idx_bookmarks_user ON public.bookmarks(user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_bookmarks_post ON public.bookmarks(post_id);
 
 -- ==============================================================================
 -- 9. COURSES, MODULES, LESSONS & PROGRESS
@@ -529,6 +583,8 @@ CREATE TABLE IF NOT EXISTS public.conversations (
   created_at timestamptz NOT NULL DEFAULT timezone('utc'::text, now()),
   updated_at timestamptz NOT NULL DEFAULT timezone('utc'::text, now())
 );
+
+CREATE INDEX IF NOT EXISTS idx_conversations_updated ON public.conversations(updated_at DESC);
 
 CREATE TABLE IF NOT EXISTS public.conversation_participants (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -628,12 +684,13 @@ CREATE TABLE IF NOT EXISTS public.creator_payout_records (
 CREATE INDEX IF NOT EXISTS idx_payout_records_creator ON public.creator_payout_records(creator_id, created_at DESC);
 
 -- ==============================================================================
--- 14. PLATFORM AUDIT & OPERATIONS
+-- 14. PLATFORM AUDIT & OPERATIONS (TAMPER-PROOF IMMUTABLE LOGS)
 -- ==============================================================================
 
 CREATE TABLE IF NOT EXISTS public.role_audit_logs (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  target_user_id uuid NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+  -- RESTRICT or standalone UUID preserves forensic evidence even if user account is deleted
+  target_user_id uuid NOT NULL,
   performed_by uuid REFERENCES public.profiles(id) ON DELETE SET NULL,
   old_role public.user_role NOT NULL,
   new_role public.user_role NOT NULL,
@@ -655,6 +712,31 @@ CREATE TABLE IF NOT EXISTS public.system_audit_logs (
 );
 
 CREATE INDEX IF NOT EXISTS idx_system_audit_action ON public.system_audit_logs(action, created_at DESC);
+
+-- Immutability enforcement trigger: prevents unauthorized tampering, updates, or deletions of audit trails
+CREATE OR REPLACE FUNCTION public.prevent_audit_log_tampering()
+RETURNS TRIGGER AS $$
+BEGIN
+  RAISE EXCEPTION 'Access Denied: Audit log records are strictly immutable and cannot be updated or deleted.'
+    USING ERRCODE = '42501';
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp;
+
+REVOKE EXECUTE ON FUNCTION public.prevent_audit_log_tampering() FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.prevent_audit_log_tampering() TO postgres;
+DO $$ BEGIN IF EXISTS (SELECT FROM pg_roles WHERE rolname = 'supabase_admin') THEN
+  GRANT EXECUTE ON FUNCTION public.prevent_audit_log_tampering() TO supabase_admin;
+END IF; END $$;
+
+DROP TRIGGER IF EXISTS trg_immutable_role_audit ON public.role_audit_logs;
+CREATE TRIGGER trg_immutable_role_audit
+  BEFORE UPDATE OR DELETE ON public.role_audit_logs
+  FOR EACH ROW EXECUTE FUNCTION public.prevent_audit_log_tampering();
+
+DROP TRIGGER IF EXISTS trg_immutable_system_audit ON public.system_audit_logs;
+CREATE TRIGGER trg_immutable_system_audit
+  BEFORE UPDATE OR DELETE ON public.system_audit_logs
+  FOR EACH ROW EXECUTE FUNCTION public.prevent_audit_log_tampering();
 
 -- ==============================================================================
 -- 15. ROW LEVEL SECURITY (RLS) POLICIES — RECURSION-SAFE ZERO-TRUST
@@ -732,11 +814,21 @@ CREATE POLICY "channels_select"
   ON public.creator_channels FOR SELECT
   USING (true);
 
-CREATE POLICY "channels_manage_owner"
-  ON public.creator_channels FOR ALL
+CREATE POLICY "channels_insert"
+  ON public.creator_channels FOR INSERT
   TO authenticated
-  USING (auth.uid() = owner_id)
   WITH CHECK (auth.uid() = owner_id);
+
+CREATE POLICY "channels_update"
+  ON public.creator_channels FOR UPDATE
+  TO authenticated
+  USING (auth.uid() = owner_id OR public.is_platform_admin(auth.uid()))
+  WITH CHECK (auth.uid() = owner_id OR public.is_platform_admin(auth.uid()));
+
+CREATE POLICY "channels_delete"
+  ON public.creator_channels FOR DELETE
+  TO authenticated
+  USING (auth.uid() = owner_id OR public.is_platform_admin(auth.uid()));
 
 CREATE POLICY "channel_subscribers_select"
   ON public.channel_subscribers FOR SELECT
@@ -831,11 +923,16 @@ CREATE POLICY "comments_insert"
   TO authenticated
   WITH CHECK (auth.uid() = author_id);
 
-CREATE POLICY "comments_update_delete"
-  ON public.comments FOR ALL
+CREATE POLICY "comments_update"
+  ON public.comments FOR UPDATE
   TO authenticated
   USING (auth.uid() = author_id OR public.is_platform_admin(auth.uid()))
   WITH CHECK (auth.uid() = author_id OR public.is_platform_admin(auth.uid()));
+
+CREATE POLICY "comments_delete"
+  ON public.comments FOR DELETE
+  TO authenticated
+  USING (auth.uid() = author_id OR public.is_platform_admin(auth.uid()));
 
 -- ------------------------------------------------------------------------------
 -- Interactions & Bookmarks Policies
@@ -913,10 +1010,27 @@ CREATE POLICY "conversations_select"
   TO authenticated
   USING (public.is_conversation_member(id, auth.uid()));
 
+CREATE POLICY "conversations_insert"
+  ON public.conversations FOR INSERT
+  TO authenticated
+  WITH CHECK (true);
+
 CREATE POLICY "conversation_participants_select"
   ON public.conversation_participants FOR SELECT
   TO authenticated
   USING (public.is_conversation_member(conversation_id, auth.uid()));
+
+CREATE POLICY "conversation_participants_insert"
+  ON public.conversation_participants FOR INSERT
+  TO authenticated
+  WITH CHECK (
+    auth.uid() = user_id
+    OR public.is_conversation_member(conversation_id, auth.uid())
+    OR NOT EXISTS (
+      SELECT 1 FROM public.conversation_participants cp
+      WHERE cp.conversation_id = conversation_participants.conversation_id
+    )
+  );
 
 CREATE POLICY "messages_select"
   ON public.messages FOR SELECT
@@ -973,7 +1087,7 @@ CREATE POLICY "payouts_select_creator"
   USING (auth.uid() = creator_id OR public.is_platform_admin(auth.uid()));
 
 -- ------------------------------------------------------------------------------
--- Audit Logs Policies (Administrative & Service-Role Read-Only)
+-- Audit Logs Policies (Administrative & Service-Role Read-Only, Immutable)
 -- ------------------------------------------------------------------------------
 CREATE POLICY "role_audit_admin_select"
   ON public.role_audit_logs FOR SELECT
