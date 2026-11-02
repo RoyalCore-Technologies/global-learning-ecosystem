@@ -2,11 +2,12 @@
 
 import React from 'react';
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import { cn } from '@/lib/utils';
 import { LearnovaLogo } from '@/components/brand/learnova-logo';
 import { Badge } from '@/components/ui/badge';
 import { Avatar } from '@/components/ui/avatar';
+import { getSupabaseBrowserClient } from '@/lib/supabase/client';
 import {
   LayoutDashboard,
   Compass,
@@ -16,7 +17,7 @@ import {
   Video,
   MessageSquare,
   Bookmark,
-  ShieldCheck,
+  LogOut,
   ChevronRight,
 } from 'lucide-react';
 
@@ -28,6 +29,18 @@ interface SidebarProps {
 
 export function Sidebar({ className, isCollapsed = false }: SidebarProps) {
   const pathname = usePathname();
+  const router = useRouter();
+
+  const handleSignOut = async () => {
+    try {
+      const supabase = getSupabaseBrowserClient();
+      await supabase.auth.signOut();
+      router.push('/auth/login');
+      router.refresh();
+    } catch (err) {
+      console.error('[Learnova Auth] Logout failed:', err);
+    }
+  };
 
   const mainNav = [
     {
@@ -219,17 +232,33 @@ export function Sidebar({ className, isCollapsed = false }: SidebarProps) {
                 </div>
               </div>
             </div>
-            <Link
-              href="/dashboard/profile"
-              className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-surface-elevated transition-colors"
-              title="View Profile"
-            >
-              <ChevronRight className="w-4 h-4" />
-            </Link>
+            <div className="flex items-center gap-1">
+              <Link
+                href="/dashboard/profile"
+                className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-surface-elevated transition-colors"
+                title="View Profile"
+              >
+                <ChevronRight className="w-4 h-4" />
+              </Link>
+              <button
+                onClick={handleSignOut}
+                className="text-slate-400 hover:text-rose-400 p-1 rounded-lg hover:bg-rose-950/30 transition-colors"
+                title="Sign Out"
+              >
+                <LogOut className="w-4 h-4" />
+              </button>
+            </div>
           </div>
         ) : (
-          <div className="flex justify-center">
+          <div className="flex flex-col items-center gap-2">
             <Avatar name="Alex Rivera" isOnline size="sm" />
+            <button
+              onClick={handleSignOut}
+              className="text-slate-400 hover:text-rose-400 p-1 rounded-lg hover:bg-rose-950/30 transition-colors"
+              title="Sign Out"
+            >
+              <LogOut className="w-3.5 h-3.5" />
+            </button>
           </div>
         )}
       </div>

@@ -94,4 +94,16 @@ describe('RoleAssignmentSecurityGuard', () => {
     );
     expect(guard.canActivate(context)).toBe(true);
   });
+
+  it('strictly blocks role changes when request attempts to forge admin authority via user_metadata', () => {
+    // Malicious user payload trying to exploit user_metadata.is_admin
+    const maliciousContext = createMockContext(
+      { role: UserRole.ADMIN },
+      {
+        role: 'STUDENT',
+        user_metadata: { is_admin: true, role: 'ADMIN' }
+      }
+    );
+    expect(() => guard.canActivate(maliciousContext)).toThrow(ForbiddenException);
+  });
 });
