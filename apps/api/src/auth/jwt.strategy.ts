@@ -35,16 +35,52 @@ export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
   private readonly expectedIssuer: string | null;
 
   constructor() {
-    const supabaseUrl = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+    const isProduction = process.env.NODE_ENV === 'production';
+    const rawSupabaseUrl = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || '';
     const jwtSecret = process.env.SUPABASE_JWT_SECRET || null;
 
-    const normalizedUrl = supabaseUrl.replace(/\/+$/, '');
+    const normalizedUrl = rawSupabaseUrl.trim().replace(/\/+$/, '');
     const isPlaceholder = !normalizedUrl || normalizedUrl.includes('placeholder');
-    const expectedIssuer = !isPlaceholder ? `${normalizedUrl}/auth/v1` : null;
 
-    // 1. Initialize JWKS provider for asymmetric signing (RS256 / ES256) when Supabase URL is present
+    // 1. Mandatory Production Environment Validation
+    if (isProduction) {
+      if (!normalizedUrl || isPlaceholder) {
+        throw new Error(
+          'CRITICAL CONFIGURATION ERROR: SUPABASE_URL is mandatory in production and cannot be empty or contain placeholder values.'
+        );
+      }
+      try {
+        const parsedUrl = new URL(normalizedUrl);
+        if (parsedUrl.protocol !== 'https:') {
+          throw new Error(
+            'CRITICAL CONFIGURATION ERROR: SUPABASE_URL must use HTTPS protocol in production.'
+          );
+        }
+      } catch (err: any) {
+        throw new Error(`CRITICAL CONFIGURATION ERROR: Invalid SUPABASE_URL: ${err.message}`);
+      }
+    } else {
+      if (normalizedUrl && !isPlaceholder) {
+        try {
+          new URL(normalizedUrl);
+        } catch (err: any) {
+          throw new Error(`Invalid SUPABASE_URL: ${err.message}`);
+        }
+      }
+    }
+
+    // Determine expected issuer: in production, this is strictly guaranteed and non-null
+    const expectedIssuer = normalizedUrl && !isPlaceholder ? `${normalizedUrl}/auth/v1` : null;
+
+    if (isProduction && !expectedIssuer) {
+      throw new Error(
+        'CRITICAL CONFIGURATION ERROR: Expected JWT issuer could not be established in production.'
+      );
+    }
+
+    // 2. Initialize JWKS provider for asymmetric signing (RS256 / ES256) when Supabase URL is present
     let jwksProvider: ReturnType<typeof passportJwtSecret> | null = null;
-    if (!isPlaceholder) {
+    if (normalizedUrl && !isPlaceholder) {
       jwksProvider = passportJwtSecret({
         cache: true,
         rateLimit: true,
@@ -122,7 +158,7 @@ export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
     });
 
     this.jwtSecret = jwtSecret;
-    this.supabaseUrl = supabaseUrl;
+    this.supabaseUrl = normalizedUrl;
     this.expectedIssuer = expectedIssuer;
     this.jwksSecretProvider = jwksProvider;
   }
@@ -134,7 +170,7 @@ export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
    * 2. Distinguishes database role (payload.role) from Learnova application role.
    * 3. Validates subject UUID format and audience.
    * 4. Enforces 'authenticated' audience and rejects 'service_role' tokens.
-   * 5. Enforces expected issuer when configured.
+   * 5. Enforces expected issuer when configured (mandatory in production).
    */
   async validate(payload: SupabaseJwtPayload): Promise<AuthenticatedUser> {
     if (!payload || !payload.sub) {
@@ -157,11 +193,16 @@ export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
       throw new UnauthorizedException(`Invalid token audience: [${payload.aud}]. Required: "authenticated".`);
     }
 
-    // 3. Strict Issuer Validation (if configured)
-    if (this.expectedIssuer && payload.iss && payload.iss !== this.expectedIssuer) {
-      throw new UnauthorizedException(
-        `Invalid token issuer: expected [${this.expectedIssuer}], received [${payload.iss}].`
-      );
+    // 3. Strict Issuer Validation (mandatory in production)
+    if (this.expectedIssuer) {
+      if (!payload.iss) {
+        throw new UnauthorizedException('Invalid JWT payload: missing issuer identifier (iss).');
+      }
+      if (payload.iss !== this.expectedIssuer) {
+        throw new UnauthorizedException(
+          `Invalid token issuer: expected [${this.expectedIssuer}], received [${payload.iss}].`
+        );
+      }
     }
 
     // Supabase database role (e.g., 'authenticated')

@@ -3,6 +3,7 @@ import { JwtStrategy, type SupabaseJwtPayload } from './jwt.strategy.js';
 import { UnauthorizedException } from '@nestjs/common';
 import { UserRole } from '@platform/types';
 import jwt from 'jsonwebtoken';
+import { validateProductionEnvironment } from '../config/env-validation.js';
 
 const TEST_SECRET = 'super-secret-test-key-32-characters-minimum';
 const TEST_SUPABASE_URL = 'https://test-project.supabase.co';
@@ -72,6 +73,7 @@ describe('JwtStrategy (Supabase Authentication & Cryptographic Verification)', (
         email: 'no-sub@learnova.edu',
         role: 'authenticated',
         aud: 'authenticated',
+        iss: EXPECTED_ISSUER,
       } as SupabaseJwtPayload;
 
       await expect(strategy.validate(invalidPayload)).rejects.toThrow(UnauthorizedException);
@@ -83,6 +85,7 @@ describe('JwtStrategy (Supabase Authentication & Cryptographic Verification)', (
         sub: '22222222-2222-2222-2222-222222222222',
         email: 'no-aud@learnova.edu',
         role: 'authenticated',
+        iss: EXPECTED_ISSUER,
       };
 
       await expect(strategy.validate(noAudPayload)).rejects.toThrow(UnauthorizedException);
@@ -95,6 +98,7 @@ describe('JwtStrategy (Supabase Authentication & Cryptographic Verification)', (
         email: 'bad-aud@learnova.edu',
         aud: 'unauthorized_audience',
         role: 'authenticated',
+        iss: EXPECTED_ISSUER,
       };
 
       await expect(strategy.validate(badAudPayload)).rejects.toThrow(UnauthorizedException);
@@ -107,12 +111,25 @@ describe('JwtStrategy (Supabase Authentication & Cryptographic Verification)', (
         email: 'service@internal.supabase',
         role: 'service_role',
         aud: 'service_role',
+        iss: EXPECTED_ISSUER,
       };
 
       await expect(strategy.validate(serviceRolePayload)).rejects.toThrow(UnauthorizedException);
       await expect(strategy.validate(serviceRolePayload)).rejects.toThrow(
         'Service-role tokens cannot be used for user authentication.'
       );
+    });
+
+    it('rejects a JWT payload missing the issuer claim (iss) when issuer is configured', async () => {
+      const noIssuerPayload: SupabaseJwtPayload = {
+        sub: '55555555-5555-5555-5555-555555555555',
+        email: 'no-issuer@learnova.edu',
+        role: 'authenticated',
+        aud: 'authenticated',
+      };
+
+      await expect(strategy.validate(noIssuerPayload)).rejects.toThrow(UnauthorizedException);
+      await expect(strategy.validate(noIssuerPayload)).rejects.toThrow('missing issuer identifier (iss)');
     });
 
     it('rejects a token with a mismatched issuer when issuer is configured', async () => {
@@ -134,6 +151,7 @@ describe('JwtStrategy (Supabase Authentication & Cryptographic Verification)', (
         email: 'attacker@learnova.test',
         role: 'authenticated',
         aud: 'authenticated',
+        iss: EXPECTED_ISSUER,
         app_metadata: {}, // Empty: backend has not granted elevated status
         user_metadata: {
           is_admin: true,
@@ -155,6 +173,7 @@ describe('JwtStrategy (Supabase Authentication & Cryptographic Verification)', (
         email: 'admin@learnova.internal',
         role: 'authenticated',
         aud: 'authenticated',
+        iss: EXPECTED_ISSUER,
         app_metadata: {
           role: UserRole.ADMIN,
         },
@@ -162,6 +181,60 @@ describe('JwtStrategy (Supabase Authentication & Cryptographic Verification)', (
 
       const user = await strategy.validate(verifiedAdminPayload);
       expect(user.role).toBe(UserRole.ADMIN);
+    });
+  });
+
+  describe('Production Environment Validation & Mandatory Issuer', () => {
+    it('throws fatal error on initialization in production if SUPABASE_URL is missing', () => {
+      process.env.NODE_ENV = 'production';
+      delete process.env.SUPABASE_URL;
+      delete process.env.NEXT_PUBLIC_SUPABASE_URL;
+
+      expect(() => new JwtStrategy()).toThrow(
+        /SUPABASE_URL is mandatory in production and cannot be empty/i
+      );
+    });
+
+    it('throws fatal error in production if SUPABASE_URL is a placeholder', () => {
+      process.env.NODE_ENV = 'production';
+      process.env.SUPABASE_URL = 'https://placeholder-project.supabase.co';
+
+      expect(() => new JwtStrategy()).toThrow(
+        /SUPABASE_URL is mandatory in production and cannot be empty or contain placeholder values/i
+      );
+    });
+
+    it('throws fatal error in production if SUPABASE_URL uses insecure HTTP protocol', () => {
+      process.env.NODE_ENV = 'production';
+      process.env.SUPABASE_URL = 'http://test-project.supabase.co';
+
+      expect(() => new JwtStrategy()).toThrow(
+        /SUPABASE_URL must use HTTPS protocol in production/i
+      );
+    });
+
+    it('throws fatal error in production if SUPABASE_URL is malformed', () => {
+      process.env.NODE_ENV = 'production';
+      process.env.SUPABASE_URL = 'not-a-valid-url';
+
+      expect(() => new JwtStrategy()).toThrow(/Invalid SUPABASE_URL/i);
+    });
+
+    it('validateProductionEnvironment() fails fast if SUPABASE_URL is missing or placeholder in production', () => {
+      process.env.NODE_ENV = 'production';
+      delete process.env.SUPABASE_URL;
+      delete process.env.NEXT_PUBLIC_SUPABASE_URL;
+
+      expect(() => validateProductionEnvironment()).toThrow(
+        /FATAL CONFIGURATION ERROR: SUPABASE_URL must be configured in production/i
+      );
+    });
+
+    it('validateProductionEnvironment() passes when valid HTTPS SUPABASE_URL is configured', () => {
+      process.env.NODE_ENV = 'production';
+      process.env.SUPABASE_URL = 'https://real-project.supabase.co';
+
+      expect(() => validateProductionEnvironment()).not.toThrow();
     });
   });
 
@@ -286,7 +359,6 @@ describe('JwtStrategy (Supabase Authentication & Cryptographic Verification)', (
     });
 
     it('rejects tokens using unapproved or prohibited algorithms (e.g. none, HS384)', async () => {
-      // Craft header with alg: 'none' or prohibited algorithm
       const unsignedHeader = Buffer.from(JSON.stringify({ alg: 'none', typ: 'JWT' })).toString('base64url');
       const payload = Buffer.from(
         JSON.stringify({

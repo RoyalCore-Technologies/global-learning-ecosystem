@@ -3,14 +3,16 @@ import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { AppModule } from './app.module.js';
+import { validateProductionEnvironment } from './config/env-validation.js';
 
 async function bootstrap() {
+  validateProductionEnvironment();
   const app = await NestFactory.create(AppModule);
 
   // Security & Cross-Origin
   app.enableCors({
     origin: process.env.CORS_ORIGIN || 'http://localhost:3000',
-    credentials: true
+    credentials: true,
   });
 
   // Global Input Validation
@@ -18,14 +20,14 @@ async function bootstrap() {
     new ValidationPipe({
       whitelist: true,
       forbidNonWhitelisted: true,
-      transform: true
+      transform: true,
     })
   );
 
   // Global API Prefix with exclusion for base health probe
   const apiPrefix = process.env.API_PREFIX || 'api/v1';
   app.setGlobalPrefix(apiPrefix, {
-    exclude: ['health']
+    exclude: ['health'],
   });
 
   // OpenAPI / Swagger Documentation
@@ -42,7 +44,7 @@ async function bootstrap() {
         bearerFormat: 'JWT',
         name: 'JWT',
         description: 'Enter your Supabase JWT auth token',
-        in: 'header'
+        in: 'header',
       },
       'JWT-auth'
     )
