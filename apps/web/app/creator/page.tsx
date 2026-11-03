@@ -11,7 +11,7 @@ import { Dialog } from '@/components/ui/dialog';
 import { Skeleton, EmptyState, ErrorState } from '@/components/ui/feedback';
 import { apiClient, ApiError } from '@/lib/api-client';
 import { getSupabaseBrowserClient } from '@/lib/supabase/client';
-import type { Course, CourseModule, Lesson, CourseLevel, ContentTier } from '@platform/types';
+import type { Course, CourseModule, Lesson, CourseLevel, ContentTier, CreatorChannel } from '@platform/types';
 import { UserRole } from '@platform/types';
 import {
   Video,
@@ -38,6 +38,7 @@ import {
   Code2,
   ChevronRight,
   ExternalLink,
+  Radio,
 } from 'lucide-react';
 
 export default function CreatorPage() {
@@ -51,6 +52,16 @@ export default function CreatorPage() {
 
   // New Course Modal State
   const [isNewCourseModalOpen, setIsNewCourseModalOpen] = useState(false);
+
+  // Creator Channel State
+  const [myChannel, setMyChannel] = useState<CreatorChannel | null>(null);
+  const [isLoadingChannel, setIsLoadingChannel] = useState(false);
+  const [isChannelModalOpen, setIsChannelModalOpen] = useState(false);
+  const [channelName, setChannelName] = useState('');
+  const [channelSlug, setChannelSlug] = useState('');
+  const [channelDesc, setChannelDesc] = useState('');
+  const [isSubmittingChannel, setIsSubmittingChannel] = useState(false);
+  const [channelError, setChannelError] = useState<string | null>(null);
   const [courseTitle, setCourseTitle] = useState('');
   const [courseSlug, setCourseSlug] = useState('');
   const [courseSummary, setCourseSummary] = useState('');
@@ -136,10 +147,77 @@ export default function CreatorPage() {
   useEffect(() => {
     if (currentUser?.id) {
       fetchInstructorCourses(currentUser.id);
+      fetchMyChannel();
     } else {
       setIsLoading(false);
     }
   }, [currentUser, fetchInstructorCourses]);
+
+  // Fetch Creator's Channel
+  const fetchMyChannel = async () => {
+    setIsLoadingChannel(true);
+    try {
+      const res = await apiClient<CreatorChannel[]>('channels?limit=50');
+      if (res.success && Array.isArray(res.data)) {
+        const found = res.data.find((ch) => ch.owner_id === currentUser?.id);
+        if (found) {
+          setMyChannel(found);
+          setChannelName(found.name);
+          setChannelSlug(found.slug);
+          setChannelDesc(found.description || '');
+        }
+      }
+    } catch {
+      // Channel lookup failed
+    } finally {
+      setIsLoadingChannel(false);
+    }
+  };
+
+  // Create or Update Channel
+  const handleSaveChannel = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!currentUser) return;
+
+    setIsSubmittingChannel(true);
+    setChannelError(null);
+
+    try {
+      if (myChannel) {
+        // Update existing channel
+        const res = await apiClient<CreatorChannel>(`channels/${myChannel.id}`, {
+          method: 'PATCH',
+          body: JSON.stringify({
+            name: channelName.trim(),
+            description: channelDesc.trim() || undefined,
+          }),
+        });
+        if (res.success && res.data) {
+          setMyChannel(res.data);
+          setIsChannelModalOpen(false);
+        }
+      } else {
+        // Create new channel
+        const res = await apiClient<CreatorChannel>('channels', {
+          method: 'POST',
+          body: JSON.stringify({
+            name: channelName.trim(),
+            slug: channelSlug.trim() || undefined,
+            description: channelDesc.trim() || undefined,
+          }),
+        });
+        if (res.success && res.data) {
+          setMyChannel(res.data);
+          setIsChannelModalOpen(false);
+        }
+      }
+    } catch (err) {
+      const apiErr = err as ApiError;
+      setChannelError(apiErr.message || 'Failed to save creator channel.');
+    } finally {
+      setIsSubmittingChannel(false);
+    }
+  };
 
   // Load Full Syllabus for Course Editor
   const openSyllabusEditor = async (courseId: string) => {
@@ -406,6 +484,16 @@ export default function CreatorPage() {
             </p>
           </div>
           <div className="flex items-center gap-3">
+            {isInstructorRole && (
+              <Button
+                size="sm"
+                variant="secondary"
+                leftIcon={<Radio className="w-3.5 h-3.5" />}
+                onClick={() => setIsChannelModalOpen(true)}
+              >
+                {myChannel ? 'Manage Channel' : 'Establish Channel'}
+              </Button>
+            )}
             <Button
               size="sm"
               variant="primary"
@@ -1031,6 +1119,97 @@ export default function CreatorPage() {
               </form>
             </div>
           ) : null}
+        </Dialog>
+
+        {/* Creator Channel Modal */}
+        <Dialog
+          isOpen={isChannelModalOpen}
+          onClose={() => setIsChannelModalOpen(false)}
+          title={myChannel ? 'Manage Creator Broadcast Channel' : 'Establish Broadcast Channel'}
+          description="A dedicated academy channel for certified technical broadcasts and masterclasses."
+          maxWidth="md"
+        >
+          <form onSubmit={handleSaveChannel} className="space-y-4 pt-2">
+            {channelError && (
+              <div className="p-3 bg-red-950/40 border border-red-500/30 text-red-300 text-xs rounded-lg">
+                {channelError}
+              </div>
+            )}
+
+            <div>
+              <label htmlFor="ch-name" className="block text-xs font-medium text-slate-300 mb-1">
+                Channel Name *
+              </label>
+              <input
+                id="ch-name"
+                type="text"
+                required
+                minLength={3}
+                maxLength={80}
+                placeholder="e.g. Frontier Robotics Academy"
+                value={channelName}
+                onChange={(e) => setChannelName(e.target.value)}
+                className="w-full px-3 py-1.5 text-xs bg-surface-subtle border border-surface-border rounded-lg text-white focus:outline-none focus:border-brand-cyan-500"
+              />
+            </div>
+
+            {!myChannel && (
+              <div>
+                <label htmlFor="ch-slug" className="block text-xs font-medium text-slate-300 mb-1">
+                  Unique Slug (Optional)
+                </label>
+                <input
+                  id="ch-slug"
+                  type="text"
+                  placeholder="frontier-robotics-academy"
+                  value={channelSlug}
+                  onChange={(e) => setChannelSlug(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ''))}
+                  className="w-full px-3 py-1.5 text-xs bg-surface-subtle border border-surface-border rounded-lg text-white focus:outline-none focus:border-brand-cyan-500"
+                />
+              </div>
+            )}
+
+            <div>
+              <label htmlFor="ch-desc" className="block text-xs font-medium text-slate-300 mb-1">
+                Channel Description
+              </label>
+              <textarea
+                id="ch-desc"
+                rows={3}
+                maxLength={2000}
+                placeholder="Core topics, curriculum orientation, and academic scope..."
+                value={channelDesc}
+                onChange={(e) => setChannelDesc(e.target.value)}
+                className="w-full px-3 py-1.5 text-xs bg-surface-subtle border border-surface-border rounded-lg text-white focus:outline-none focus:border-brand-cyan-500 resize-none"
+              />
+            </div>
+
+            {myChannel && (
+              <div className="p-3 bg-surface-subtle border border-surface-border rounded-xl flex items-center justify-between text-xs">
+                <span className="text-slate-400">Total Subscribers</span>
+                <span className="font-mono font-bold text-white">{myChannel.subscriber_count}</span>
+              </div>
+            )}
+
+            <div className="flex items-center justify-end gap-2 pt-4 border-t border-surface-border">
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => setIsChannelModalOpen(false)}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="submit"
+                variant="primary"
+                size="sm"
+                isLoading={isSubmittingChannel}
+              >
+                {myChannel ? 'Save Changes' : 'Establish Channel'}
+              </Button>
+            </div>
+          </form>
         </Dialog>
       </div>
     </AppShell>
