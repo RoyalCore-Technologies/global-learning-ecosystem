@@ -6,7 +6,10 @@ import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter }
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Avatar } from '@/components/ui/avatar';
+import { Skeleton, EmptyState } from '@/components/ui/feedback';
 import { getSupabaseBrowserClient } from '@/lib/supabase/client';
+import { apiClient } from '@/lib/api-client';
+import type { CourseEnrollment } from '@platform/types';
 import {
   Sparkles,
   BookOpen,
@@ -19,6 +22,7 @@ import {
   Clock,
   Send,
   MessageSquare,
+  GraduationCap,
 } from 'lucide-react';
 import Link from 'next/link';
 
@@ -28,6 +32,10 @@ export default function DashboardPage() {
   const [aiPrompt, setAiPrompt] = useState('');
   const [isAskingAi, setIsAskingAi] = useState(false);
   const [aiResponse, setAiResponse] = useState<string | null>(null);
+
+  // Enrollments State
+  const [enrollments, setEnrollments] = useState<CourseEnrollment[]>([]);
+  const [isLoadingEnrollments, setIsLoadingEnrollments] = useState<boolean>(true);
 
   useEffect(() => {
     try {
@@ -47,6 +55,25 @@ export default function DashboardPage() {
     } catch {
       // Unauthenticated
     }
+
+    // Fetch real student enrollments: GET /api/v1/me/enrollments
+    async function loadEnrollments() {
+      setIsLoadingEnrollments(true);
+      try {
+        const res = await apiClient<CourseEnrollment[]>('me/enrollments?limit=5');
+        if (res.success && Array.isArray(res.data)) {
+          setEnrollments(res.data);
+        } else {
+          setEnrollments([]);
+        }
+      } catch {
+        setEnrollments([]);
+      } finally {
+        setIsLoadingEnrollments(false);
+      }
+    }
+
+    loadEnrollments();
   }, []);
 
   const handleAskAi = (e: React.FormEvent) => {
@@ -61,6 +88,12 @@ export default function DashboardPage() {
       );
     }, 900);
   };
+
+  const primaryEnrollment = enrollments[0];
+  const primaryCourse = primaryEnrollment?.course;
+  const primaryCourseHref = primaryCourse
+    ? `/courses/${primaryCourse.slug || primaryCourse.id}`
+    : '/courses';
 
   const rightAside = (
     <div className="space-y-6">
@@ -84,8 +117,8 @@ export default function DashboardPage() {
           </div>
           <div className="grid grid-cols-3 gap-2 pt-2 text-center text-[10px]">
             <div className="p-2 rounded-lg bg-surface-subtle/60 border border-surface-border">
-              <p className="font-bold text-white text-sm">4</p>
-              <p className="text-slate-400">Modules</p>
+              <p className="font-bold text-white text-sm">{enrollments.length}</p>
+              <p className="text-slate-400">Enrolled</p>
             </div>
             <div className="p-2 rounded-lg bg-surface-subtle/60 border border-surface-border">
               <p className="font-bold text-emerald-400 text-sm">9</p>
@@ -150,7 +183,7 @@ export default function DashboardPage() {
             <div className="flex flex-wrap items-center gap-2">
               <Badge roleType={userRole as any} isVerified={userRole !== 'STUDENT'} />
               <Badge variant="secondary" className="text-slate-300">
-                Active Track: Computer Science & Systems
+                {primaryCourse ? `Track: ${primaryCourse.title}` : 'Active Track: Computer Science & Systems'}
               </Badge>
             </div>
 
@@ -159,14 +192,13 @@ export default function DashboardPage() {
             </h1>
 
             <p className="text-sm text-slate-300 leading-relaxed">
-              Knowledge over popularity. Your focus session today continues the distributed
-              consensus track. 2 peer reviews are pending your endorsement.
+              Knowledge over popularity. Your learning environment is configured with verified peer reviews and formal academic rigor.
             </p>
 
             <div className="pt-2 flex flex-wrap gap-3">
-              <Link href="/courses/distributed-systems">
+              <Link href={primaryCourseHref}>
                 <Button size="md" rightIcon={<ArrowRight className="w-4 h-4" />}>
-                  Resume Course
+                  {primaryCourse ? 'Resume Course' : 'Explore Courses'}
                 </Button>
               </Link>
               <Link href="/explore">
@@ -177,7 +209,6 @@ export default function DashboardPage() {
             </div>
           </div>
 
-          {/* Decorative Background Accent */}
           <div className="absolute -right-16 -top-16 w-80 h-80 bg-brand-indigo-600/10 rounded-full blur-3xl pointer-events-none" />
         </div>
 
@@ -231,65 +262,100 @@ export default function DashboardPage() {
           </CardContent>
         </Card>
 
-        {/* Current Active Learning Curriculum Track */}
+        {/* Current Active Learning Curriculum Track (Connected to real enrollments) */}
         <div className="space-y-4">
           <div className="flex items-center justify-between">
             <h2 className="text-lg font-bold text-white tracking-tight flex items-center gap-2">
-              <BookOpen className="w-5 h-5 text-brand-indigo-400" /> Current Course & Milestone
+              <BookOpen className="w-5 h-5 text-brand-indigo-400" /> Current Course &amp; Milestone
             </h2>
             <Link
               href="/courses"
               className="text-xs font-semibold text-brand-indigo-400 hover:text-brand-indigo-300"
             >
-              View all 12 modules &rarr;
+              Browse Course Catalog &rarr;
             </Link>
           </div>
 
-          <Card className="border-surface-border hover:border-brand-indigo-500/40 transition-colors">
-            <div className="p-6 grid grid-cols-1 md:grid-cols-3 gap-6 items-center">
-              <div className="md:col-span-2 space-y-2">
-                <div className="flex items-center gap-2">
-                  <Badge variant="secondary" className="text-[10px]">
-                    Module 4 of 8
-                  </Badge>
-                  <span className="text-xs text-slate-400 flex items-center gap-1">
-                    <Clock className="w-3.5 h-3.5" /> 45 mins remaining
-                  </span>
-                </div>
-                <h3 className="text-base font-bold text-white">
-                  Distributed Systems: Consensus Protocols & Fault Tolerance
-                </h3>
-                <p className="text-xs text-slate-400 leading-relaxed">
-                  Next lesson: Implementing Leader Election and Heartbeat Term Validation in
-                  the Raft protocol state machine.
-                </p>
+          {isLoadingEnrollments ? (
+            <Card className="border-surface-border p-6 space-y-3">
+              <Skeleton className="h-5 w-32" />
+              <Skeleton className="h-7 w-2/3" />
+              <Skeleton className="h-4 w-full" />
+              <Skeleton className="h-3 w-1/2" />
+            </Card>
+          ) : primaryCourse ? (
+            <Card className="border-surface-border hover:border-brand-indigo-500/40 transition-colors">
+              <div className="p-6 grid grid-cols-1 md:grid-cols-3 gap-6 items-center">
+                <div className="md:col-span-2 space-y-2">
+                  <div className="flex items-center gap-2">
+                    <Badge variant={primaryCourse.tier === 'FREE' ? 'secondary' : 'tier'} className="text-[10px]">
+                      {primaryCourse.tier}
+                    </Badge>
+                    <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-surface-elevated text-slate-300">
+                      {primaryCourse.level}
+                    </span>
+                    {primaryEnrollment.completed_at && (
+                      <Badge variant="success" className="text-[10px]">
+                        Track Completed
+                      </Badge>
+                    )}
+                  </div>
 
-                {/* Progress bar */}
-                <div className="pt-2 space-y-1">
-                  <div className="flex justify-between text-xs">
-                    <span className="text-slate-400">Milestone Progress</span>
-                    <span className="text-emerald-400 font-bold">62% Complete</span>
+                  <h3 className="text-base font-bold text-white">
+                    {primaryCourse.title}
+                  </h3>
+
+                  <p className="text-xs text-slate-400 leading-relaxed line-clamp-2">
+                    {primaryCourse.summary || primaryCourse.description}
+                  </p>
+
+                  {/* Progress bar */}
+                  <div className="pt-2 space-y-1">
+                    <div className="flex justify-between text-xs">
+                      <span className="text-slate-400">Track Progress</span>
+                      <span className="text-emerald-400 font-bold">
+                        {primaryEnrollment.progress_percentage}% Complete
+                      </span>
+                    </div>
+                    <div className="w-full h-2 rounded-full bg-surface-subtle overflow-hidden">
+                      <div
+                        className="h-full bg-gradient-to-r from-brand-indigo-500 to-emerald-400 rounded-full transition-all duration-500"
+                        style={{ width: `${primaryEnrollment.progress_percentage}%` }}
+                      />
+                    </div>
                   </div>
-                  <div className="w-full h-2 rounded-full bg-surface-subtle overflow-hidden">
-                    <div className="h-full bg-gradient-to-r from-brand-indigo-500 to-emerald-400 rounded-full w-[62%]" />
-                  </div>
+                </div>
+
+                <div className="flex flex-col sm:flex-row md:flex-col gap-2 justify-center">
+                  <Link href={primaryCourseHref}>
+                    <Button size="md" className="w-full">
+                      Resume Course
+                    </Button>
+                  </Link>
+                  <Link href="/courses">
+                    <Button size="md" variant="secondary" className="w-full">
+                      Catalog Syllabi
+                    </Button>
+                  </Link>
                 </div>
               </div>
-
-              <div className="flex flex-col sm:flex-row md:flex-col gap-2 justify-center">
-                <Link href="/courses/distributed-systems/lesson-4">
-                  <Button size="md" className="w-full">
-                    Resume Lesson
-                  </Button>
-                </Link>
-                <Link href="/courses/distributed-systems/reviews">
-                  <Button size="md" variant="secondary" className="w-full">
-                    Peer Reviews (2)
-                  </Button>
+            </Card>
+          ) : (
+            <Card className="border-surface-border border-dashed p-8 text-center space-y-3">
+              <div className="w-12 h-12 rounded-2xl bg-surface-elevated text-brand-indigo-400 mx-auto flex items-center justify-center border border-surface-border">
+                <GraduationCap className="w-6 h-6" />
+              </div>
+              <h3 className="text-sm font-bold text-white">No Active Course Enrollments</h3>
+              <p className="text-xs text-slate-400 max-w-sm mx-auto">
+                Explore structured tracks verified by university educators and industry researchers to begin tracking milestones.
+              </p>
+              <div className="pt-2">
+                <Link href="/courses">
+                  <Button size="sm">Explore Course Catalog</Button>
                 </Link>
               </div>
-            </div>
-          </Card>
+            </Card>
+          )}
         </div>
 
         {/* Knowledge Feed Spotlight (Peer-Reviewed Top Insight) */}
