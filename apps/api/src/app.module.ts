@@ -11,6 +11,7 @@ import { InteractionsModule } from './interactions/interactions.module.js';
 import { CommentsModule } from './comments/comments.module.js';
 import { NotificationsModule } from './notifications/notifications.module.js';
 import { ModerationModule } from './moderation/moderation.module.js';
+import { CoursesModule } from './courses/courses.module.js';
 
 @Module({
   imports: [
@@ -33,6 +34,7 @@ import { ModerationModule } from './moderation/moderation.module.js';
     CommentsModule,
     NotificationsModule,
     ModerationModule,
+    CoursesModule,
   ],
   providers: [
     {

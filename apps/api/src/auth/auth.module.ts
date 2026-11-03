@@ -4,6 +4,7 @@ import { RoleSecurityService } from './role-security.service.js';
 import { RoleAssignmentSecurityGuard } from './role-assignment.guard.js';
 import { JwtStrategy } from './jwt.strategy.js';
 import { JwtAuthGuard } from './jwt-auth.guard.js';
+import { OptionalJwtAuthGuard } from './optional-jwt-auth.guard.js';
 import { AuthController } from './auth.controller.js';
 
 @Module({
@@ -16,12 +17,14 @@ import { AuthController } from './auth.controller.js';
     RoleAssignmentSecurityGuard,
     JwtStrategy,
     JwtAuthGuard,
+    OptionalJwtAuthGuard,
   ],
   exports: [
     RoleSecurityService,
     RoleAssignmentSecurityGuard,
     JwtStrategy,
     JwtAuthGuard,
+    OptionalJwtAuthGuard,
   ],
 })
 export class AuthModule {}
