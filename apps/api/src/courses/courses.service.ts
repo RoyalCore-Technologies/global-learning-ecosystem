@@ -279,7 +279,14 @@ export class CoursesService {
   async createCourse(instructorId: string, dto: CreateCourseDto): Promise<Course> {
     const client = this.databaseService.getClient();
 
-    const slug = dto.slug?.trim() || this.generateSlug(dto.title);
+    const rawSlug = dto.slug?.trim()
+      ? dto.slug
+          .trim()
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, '-')
+          .replace(/(^-|-$)+/g, '')
+      : this.generateSlug(dto.title);
+    const slug = rawSlug || this.generateSlug(dto.title);
 
     // Verify slug uniqueness
     const { data: existingSlug } = await client
@@ -345,7 +352,13 @@ export class CoursesService {
     };
 
     if (dto.title !== undefined) updatePayload.title = dto.title.trim();
-    if (dto.slug !== undefined) updatePayload.slug = dto.slug.trim();
+    if (dto.slug !== undefined) {
+      updatePayload.slug = dto.slug
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/(^-|-$)+/g, '');
+    }
     if (dto.summary !== undefined) updatePayload.summary = dto.summary?.trim() || null;
     if (dto.description !== undefined) updatePayload.description = dto.description.trim();
     if (dto.level !== undefined) updatePayload.level = dto.level;

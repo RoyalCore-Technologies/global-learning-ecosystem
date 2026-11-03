@@ -244,6 +244,7 @@ export default function CourseLectureInterfacePage({
       setUserCode('');
     }
     setCurrentProgressSec(0);
+    setVideoDurationSec(0);
     setIsPlaying(false);
     if (videoRef.current) {
       videoRef.current.currentTime = 0;
@@ -264,6 +265,7 @@ export default function CourseLectureInterfacePage({
   };
 
   const handleSeek = (seconds: number) => {
+    if (isNaN(seconds) || !isFinite(seconds)) return;
     const clamped = Math.max(0, Math.min(seconds, effectiveDurationSec));
     setCurrentProgressSec(clamped);
     if (videoRef.current) {
@@ -550,6 +552,17 @@ export default function CourseLectureInterfacePage({
                         : `Enroll in Track ($${(course.price_cents / 100).toFixed(2)})`}
                     </Button>
                   </div>
+                ) : allLessons.length === 0 ? (
+                  /* Zero Lessons Empty State */
+                  <div className="space-y-2 max-w-md bg-black/75 p-6 rounded-2xl border border-white/10 backdrop-blur-sm pointer-events-auto">
+                    <div className="w-12 h-12 rounded-2xl bg-surface-elevated text-brand-indigo-400 mx-auto flex items-center justify-center border border-surface-border">
+                      <BookOpen className="w-6 h-6" />
+                    </div>
+                    <h3 className="text-sm font-bold text-white">Curriculum Under Preparation</h3>
+                    <p className="text-xs text-slate-300">
+                      The course author has not published any syllabus lessons yet. Check back shortly for updates.
+                    </p>
+                  </div>
                 ) : !activeLesson?.video_url ? (
                   /* Honest Video Stream In Preparation Screen */
                   <div className="space-y-2 max-w-md bg-black/75 p-6 rounded-2xl border border-white/10 backdrop-blur-sm pointer-events-auto">
@@ -578,7 +591,17 @@ export default function CourseLectureInterfacePage({
               {/* Bottom Video Controls Scrubber Bar */}
               <div className="relative z-10 p-4 bg-gradient-to-t from-black/90 via-black/50 to-transparent space-y-2 pointer-events-auto">
                 <div
-                  className="w-full h-1.5 rounded-full bg-white/20 cursor-pointer overflow-hidden relative"
+                  role="slider"
+                  aria-label="Video playback progress"
+                  aria-valuenow={currentProgressSec}
+                  aria-valuemin={0}
+                  aria-valuemax={effectiveDurationSec}
+                  tabIndex={0}
+                  className="w-full h-1.5 rounded-full bg-white/20 cursor-pointer overflow-hidden relative focus:outline-none focus:ring-1 focus:ring-brand-indigo-400"
+                  onKeyDown={(e) => {
+                    if (e.key === 'ArrowRight') handleSeek(currentProgressSec + 5);
+                    if (e.key === 'ArrowLeft') handleSeek(currentProgressSec - 5);
+                  }}
                   onClick={(e) => {
                     const rect = e.currentTarget.getBoundingClientRect();
                     const clickX = e.clientX - rect.left;
@@ -631,14 +654,18 @@ export default function CourseLectureInterfacePage({
                         </button>
                       ))}
                     </div>
-                    <Maximize2
-                      className="w-4 h-4 text-slate-300 hover:text-white cursor-pointer"
+                    <button
+                      type="button"
+                      aria-label="Toggle fullscreen"
                       onClick={() => {
                         if (videoRef.current?.requestFullscreen) {
                           videoRef.current.requestFullscreen();
                         }
                       }}
-                    />
+                      className="p-1 rounded hover:bg-white/10 text-slate-300 hover:text-white transition-colors focus:outline-none"
+                    >
+                      <Maximize2 className="w-4 h-4" />
+                    </button>
                   </div>
                 </div>
               </div>

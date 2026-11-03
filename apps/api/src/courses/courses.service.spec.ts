@@ -647,5 +647,84 @@ describe('CoursesService', () => {
         })
       ).rejects.toThrow(ForbiddenException);
     });
+
+    it('sanitizes custom slugs on creation into url-safe format', async () => {
+      const mockCreated = {
+        id: 'new-id',
+        instructor_id: 'inst-1',
+        title: 'Formal Invariants',
+        slug: 'formal-invariants-spec-1',
+      };
+
+      let capturedPayload: any = null;
+
+      mockSupabaseClient.from.mockImplementation((table: string) => {
+        if (table === 'courses') {
+          return {
+            select: vi.fn().mockReturnValue({
+              eq: vi.fn().mockReturnValue({
+                maybeSingle: vi.fn().mockResolvedValue({ data: null, error: null }),
+              }),
+            }),
+            insert: vi.fn().mockImplementation((payload) => {
+              capturedPayload = payload;
+              return {
+                select: vi.fn().mockReturnValue({
+                  single: vi.fn().mockResolvedValue({ data: mockCreated, error: null }),
+                }),
+              };
+            }),
+          };
+        }
+        return {};
+      });
+
+      await service.createCourse('inst-1', {
+        title: 'Formal Invariants',
+        description: 'Testing formal invariants in distributed systems.',
+        slug: '  Formal Invariants & Spec (1)!  ',
+      });
+
+      expect(capturedPayload).toBeDefined();
+      expect(capturedPayload.slug).toBe('formal-invariants-spec-1');
+      expect(capturedPayload.slug).not.toContain(' ');
+      expect(capturedPayload.slug).not.toContain('&');
+    });
+
+    it('returns empty module array when course has no curriculum modules', async () => {
+      const emptyCourse = {
+        id: 'c-empty',
+        instructor_id: 'inst-1',
+        title: 'Empty Course Track',
+        slug: 'empty-course',
+        is_published: true,
+      };
+
+      mockSupabaseClient.from.mockImplementation((table: string) => {
+        if (table === 'courses') {
+          return {
+            select: vi.fn().mockReturnValue({
+              eq: vi.fn().mockReturnValue({
+                maybeSingle: vi.fn().mockResolvedValue({ data: emptyCourse, error: null }),
+              }),
+            }),
+          };
+        }
+        if (table === 'course_modules') {
+          return {
+            select: vi.fn().mockReturnValue({
+              eq: vi.fn().mockReturnValue({
+                order: vi.fn().mockResolvedValue({ data: [], error: null }),
+              }),
+            }),
+          };
+        }
+        return {};
+      });
+
+      const res = await service.getCourseBySlugOrId('empty-course');
+      expect(res.id).toBe('c-empty');
+      expect(res.modules).toEqual([]);
+    });
   });
 });

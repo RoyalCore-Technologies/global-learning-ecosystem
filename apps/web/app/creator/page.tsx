@@ -341,6 +341,9 @@ export default function CreatorPage() {
       if (updated.success && updated.data) {
         setSelectedCourse(updated.data);
       }
+      if (currentUser?.id) {
+        fetchInstructorCourses(currentUser.id);
+      }
     } catch (err) {
       const apiErr = err as ApiError;
       alert(`Failed to delete module: ${apiErr.message}`);
@@ -357,6 +360,9 @@ export default function CreatorPage() {
       const updated = await apiClient<Course>(`courses/${selectedCourse.id}`);
       if (updated.success && updated.data) {
         setSelectedCourse(updated.data);
+      }
+      if (currentUser?.id) {
+        fetchInstructorCourses(currentUser.id);
       }
     } catch (err) {
       const apiErr = err as ApiError;

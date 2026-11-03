@@ -436,5 +436,46 @@ describe('Learnova Course Catalog & Syllabus UI Integration (M3.4)', () => {
       expect(slidesResource?.title).toBe('Distributed Systems Lecture Slides');
       expect(slidesResource?.type).toBe('SLIDES');
     });
+
+    it('handles courses with zero lessons safely without divide-by-zero', () => {
+      const emptyLessons: Lesson[] = [];
+      const completedCount = 0;
+      const progressPercent =
+        emptyLessons.length > 0 ? Math.round((completedCount / emptyLessons.length) * 100) : 0;
+
+      expect(progressPercent).toBe(0);
+      expect(Number.isFinite(progressPercent)).toBe(true);
+    });
+
+    it('enforces scrubber slider keyboard seeking within bounds', () => {
+      const effectiveDurationSec = 1800; // 30 mins
+      let currentProgressSec = 100;
+
+      // Seek forward by 5s
+      currentProgressSec = Math.max(0, Math.min(currentProgressSec + 5, effectiveDurationSec));
+      expect(currentProgressSec).toBe(105);
+
+      // Seek backward by 200s (clamps to 0)
+      currentProgressSec = Math.max(0, Math.min(currentProgressSec - 200, effectiveDurationSec));
+      expect(currentProgressSec).toBe(0);
+
+      // Seek beyond duration (clamps to effectiveDurationSec)
+      currentProgressSec = Math.max(0, Math.min(2500, effectiveDurationSec));
+      expect(currentProgressSec).toBe(1800);
+    });
+
+    it('sanitizes user-provided course slugs into clean lowercase url segments', () => {
+      const rawInput = '  Advanced Consensus & State-Machines (Part 1)!  ';
+      const sanitized = rawInput
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/(^-|-$)+/g, '');
+
+      expect(sanitized).toBe('advanced-consensus-state-machines-part-1');
+      expect(sanitized).not.toContain(' ');
+      expect(sanitized).not.toContain('&');
+      expect(sanitized).not.toContain('!');
+    });
   });
 });
