@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
-import { TABLES, STORAGE_BUCKETS, SECURITY_FUNCTIONS, SOCIAL_FUNCTIONS, LEARNING_FUNCTIONS } from './index.js';
+import { TABLES, STORAGE_BUCKETS, SECURITY_FUNCTIONS, SOCIAL_FUNCTIONS, LEARNING_FUNCTIONS, CREATOR_COMMUNITY_FUNCTIONS } from './index.js';
 
 describe('Learnova Database Migrations & Safety Suite', () => {
   const migrationsDir = path.resolve(__dirname, '../migrations');
@@ -96,6 +96,23 @@ describe('Learnova Database Migrations & Safety Suite', () => {
     expect(sql005).toContain('code_lab');
     expect(sql005).toContain('course_modules_insert');
     expect(sql005).toContain('lessons_insert');
+  });
+
+  it('verifies migration 006 implements creator & community triggers, RLS hardening, and indexes', () => {
+    const migration006Path = path.join(migrationsDir, '006_creator_community.sql');
+    expect(fs.existsSync(migration006Path)).toBe(true);
+
+    const sql006 = fs.readFileSync(migration006Path, 'utf8');
+    Object.values(CREATOR_COMMUNITY_FUNCTIONS).forEach((fnName) => {
+      expect(sql006).toContain(fnName);
+    });
+
+    expect(sql006).toContain('trigger_sync_community_member_count');
+    expect(sql006).toContain('trigger_sync_channel_subscriber_count');
+    expect(sql006).toContain('community_members_join');
+    expect(sql006).toContain('communities_delete');
+    expect(sql006).toContain('idx_communities_discovery');
+    expect(sql006).toContain('idx_community_members_role');
   });
 
   it('guarantees zero payment card columns or sensitive secrets in monetization tables', () => {

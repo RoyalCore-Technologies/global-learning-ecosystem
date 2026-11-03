@@ -42,6 +42,8 @@ export type ReportStatus =
   | 'RESOLVED'
   | 'DISMISSED';
 
+export type CommunityRole = 'MEMBER' | 'MODERATOR' | 'LEAD';
+
 export interface NotificationPreferences {
   in_app: {
     comments: boolean;
@@ -197,4 +199,53 @@ export interface Report {
   resolution_notes?: string | null;
   created_at: string;
   resolved_at?: string | null;
+}
+
+export interface Community {
+  id: string;
+  creator_id: string;
+  name: string;
+  slug: string;
+  description?: string | null;
+  avatar_url?: string | null;
+  banner_url?: string | null;
+  is_private: boolean;
+  member_count: number;
+  created_at: string;
+  updated_at: string;
+  creator?: Profile;
+}
+
+export interface CommunityMember {
+  id: string;
+  community_id: string;
+  user_id: string;
+  role: CommunityRole;
+  joined_at: string;
+  profile?: Profile;
+  community?: Community;
+}
+
+export interface CreatorChannel {
+  id: string;
+  owner_id: string;
+  name: string;
+  slug: string;
+  description?: string | null;
+  avatar_url?: string | null;
+  banner_url?: string | null;
+  is_verified: boolean;
+  subscriber_count: number;
+  created_at: string;
+  updated_at: string;
+  owner?: Profile;
+}
+
+export interface ChannelSubscriber {
+  id: string;
+  channel_id: string;
+  user_id: string;
+  subscribed_at: string;
+  profile?: Profile;
+  channel?: CreatorChannel;
 }
