@@ -231,4 +231,115 @@ describe('PostsService', () => {
       await expect(service.deletePost('post-1', 'author-1', false)).resolves.not.toThrow();
     });
   });
+
+  describe('community and channel associations & filters', () => {
+    it('creates a post associated with a public community', async () => {
+      const authorId = 'author-uuid-1';
+      const dto = {
+        title: 'Community Article',
+        content: '# Community Insights',
+        community_id: 'comm-123',
+      };
+
+      const mockCreated = {
+        id: 'post-comm-1',
+        author_id: authorId,
+        community_id: 'comm-123',
+        channel_id: null,
+        title: dto.title,
+        slug: 'community-article-abc',
+        content: dto.content,
+      };
+
+      mockSupabaseClient.from.mockImplementation((table: string) => {
+        if (table === 'communities') {
+          return {
+            select: vi.fn().mockReturnThis(),
+            eq: vi.fn().mockReturnThis(),
+            maybeSingle: vi.fn().mockResolvedValue({
+              data: { id: 'comm-123', is_private: false, creator_id: 'creator-99' },
+            }),
+          };
+        }
+        if (table === 'posts') {
+          return {
+            select: vi.fn().mockReturnValue({
+              eq: vi.fn().mockReturnValue({
+                maybeSingle: vi.fn().mockResolvedValue({ data: null }),
+              }),
+            }),
+            insert: vi.fn().mockReturnValue({
+              select: vi.fn().mockReturnValue({
+                single: vi.fn().mockResolvedValue({ data: mockCreated, error: null }),
+              }),
+            }),
+          };
+        }
+        if (table === 'post_tags') {
+          return {
+            select: vi.fn().mockReturnValue({
+              eq: vi.fn().mockResolvedValue({ data: [] }),
+            }),
+          };
+        }
+        return {};
+      });
+
+      const res = await service.createPost(authorId, dto);
+      expect(res.community_id).toBe('comm-123');
+    });
+
+    it('rejects posting to channel if user is not channel owner', async () => {
+      const authorId = 'imposter-uuid';
+      const dto = {
+        title: 'Unauthorized Channel Broadcast',
+        content: 'Broadcast content',
+        channel_id: 'chan-123',
+      };
+
+      mockSupabaseClient.from.mockImplementation((table: string) => {
+        if (table === 'creator_channels') {
+          return {
+            select: vi.fn().mockReturnThis(),
+            eq: vi.fn().mockReturnThis(),
+            maybeSingle: vi.fn().mockResolvedValue({
+              data: { id: 'chan-123', owner_id: 'actual-owner-uuid' },
+            }),
+          };
+        }
+        if (table === 'posts') {
+          return {
+            select: vi.fn().mockReturnValue({
+              eq: vi.fn().mockReturnValue({
+                maybeSingle: vi.fn().mockResolvedValue({ data: null }),
+              }),
+            }),
+          };
+        }
+        return {};
+      });
+
+      await expect(service.createPost(authorId, dto)).rejects.toThrow(ForbiddenException);
+    });
+
+    it('applies community_id and channel_id filters to getFeed', async () => {
+      const chain: any = {};
+      chain.select = vi.fn().mockReturnValue(chain);
+      chain.eq = vi.fn().mockReturnValue(chain);
+      chain.order = vi.fn().mockReturnValue(chain);
+      chain.range = vi.fn().mockResolvedValue({ data: [], error: null, count: 0 });
+
+      mockSupabaseClient.from.mockReturnValue(chain);
+
+      await service.getFeed({
+        community_id: 'c-1',
+        channel_id: 'ch-1',
+        author_id: 'a-1',
+      });
+
+      expect(chain.eq).toHaveBeenCalledWith('community_id', 'c-1');
+      expect(chain.eq).toHaveBeenCalledWith('channel_id', 'ch-1');
+      expect(chain.eq).toHaveBeenCalledWith('author_id', 'a-1');
+    });
+  });
 });

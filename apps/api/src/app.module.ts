@@ -13,6 +13,8 @@ import { NotificationsModule } from './notifications/notifications.module.js';
 import { ModerationModule } from './moderation/moderation.module.js';
 import { CoursesModule } from './courses/courses.module.js';
 import { EnrollmentsModule } from './enrollments/enrollments.module.js';
+import { CommunitiesModule } from './communities/communities.module.js';
+import { ChannelsModule } from './channels/channels.module.js';
 
 @Module({
   imports: [
@@ -37,6 +39,8 @@ import { EnrollmentsModule } from './enrollments/enrollments.module.js';
     ModerationModule,
     CoursesModule,
     EnrollmentsModule,
+    CommunitiesModule,
+    ChannelsModule,
   ],
   providers: [
     {

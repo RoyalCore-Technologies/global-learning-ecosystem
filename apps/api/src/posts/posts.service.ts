@@ -49,10 +49,55 @@ export class PostsService {
 
     const finalSlug = existingSlug ? `${slug}-${Date.now().toString(36)}` : slug;
 
+    // Validate and authorize community association if specified
+    if (dto.community_id) {
+      const { data: community, error: commError } = await client
+        .from('communities')
+        .select('id, is_private, creator_id')
+        .eq('id', dto.community_id)
+        .maybeSingle();
+
+      if (commError || !community) {
+        throw new NotFoundException(`Community with ID '${dto.community_id}' not found.`);
+      }
+
+      if (community.is_private) {
+        const { data: membership } = await client
+          .from('community_members')
+          .select('id')
+          .eq('community_id', community.id)
+          .eq('user_id', authorId)
+          .maybeSingle();
+
+        if (!membership && community.creator_id !== authorId) {
+          throw new ForbiddenException('You must be a member of this private community to publish posts to it.');
+        }
+      }
+    }
+
+    // Validate and authorize channel association if specified
+    if (dto.channel_id) {
+      const { data: channel, error: chanError } = await client
+        .from('creator_channels')
+        .select('id, owner_id')
+        .eq('id', dto.channel_id)
+        .maybeSingle();
+
+      if (chanError || !channel) {
+        throw new NotFoundException(`Creator channel with ID '${dto.channel_id}' not found.`);
+      }
+
+      if (channel.owner_id !== authorId) {
+        throw new ForbiddenException('Only the channel owner can publish posts to this channel.');
+      }
+    }
+
     const { data: newPost, error: insertError } = await client
       .from('posts')
       .insert({
         author_id: authorId,
+        community_id: dto.community_id || null,
+        channel_id: dto.channel_id || null,
         title: dto.title.trim(),
         slug: finalSlug,
         summary: dto.summary?.trim() || null,
@@ -106,6 +151,21 @@ export class PostsService {
     // Filter by post type if specified
     if (query.type) {
       postsQuery = postsQuery.eq('type', query.type);
+    }
+
+    // Filter by community if specified
+    if (query.community_id) {
+      postsQuery = postsQuery.eq('community_id', query.community_id);
+    }
+
+    // Filter by channel if specified
+    if (query.channel_id) {
+      postsQuery = postsQuery.eq('channel_id', query.channel_id);
+    }
+
+    // Filter by author if specified
+    if (query.author_id) {
+      postsQuery = postsQuery.eq('author_id', query.author_id);
     }
 
     // Filter by tag if specified

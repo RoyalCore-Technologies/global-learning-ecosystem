@@ -26,6 +26,21 @@ export class FeedQueryDto {
   @IsString()
   tag?: string;
 
+  @ApiPropertyOptional({ description: 'Filter by community ID' })
+  @IsOptional()
+  @IsString()
+  community_id?: string;
+
+  @ApiPropertyOptional({ description: 'Filter by creator channel ID' })
+  @IsOptional()
+  @IsString()
+  channel_id?: string;
+
+  @ApiPropertyOptional({ description: 'Filter by author user ID' })
+  @IsOptional()
+  @IsString()
+  author_id?: string;
+
   @ApiPropertyOptional({ description: 'Full-text search query across title, summary and content' })
   @IsOptional()
   @IsString()
