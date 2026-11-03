@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
-import { TABLES, STORAGE_BUCKETS, SECURITY_FUNCTIONS, SOCIAL_FUNCTIONS } from './index.js';
+import { TABLES, STORAGE_BUCKETS, SECURITY_FUNCTIONS, SOCIAL_FUNCTIONS, LEARNING_FUNCTIONS } from './index.js';
 
 describe('Learnova Database Migrations & Safety Suite', () => {
   const migrationsDir = path.resolve(__dirname, '../migrations');
@@ -80,6 +80,22 @@ describe('Learnova Database Migrations & Safety Suite', () => {
     expect(sql004).toContain('is_solution');
     expect(sql004).toContain('is_pinned');
     expect(sql004).toContain('idx_posts_fts');
+  });
+
+  it('verifies migration 005 implements learning foundation triggers, metadata fields, and authoring policies', () => {
+    const migration005Path = path.join(migrationsDir, '005_learning_foundation.sql');
+    expect(fs.existsSync(migration005Path)).toBe(true);
+
+    const sql005 = fs.readFileSync(migration005Path, 'utf8');
+    Object.values(LEARNING_FUNCTIONS).forEach((fnName) => {
+      expect(sql005).toContain(fnName);
+    });
+
+    expect(sql005).toContain('enrolled_count');
+    expect(sql005).toContain('transcript');
+    expect(sql005).toContain('code_lab');
+    expect(sql005).toContain('course_modules_insert');
+    expect(sql005).toContain('lessons_insert');
   });
 
   it('guarantees zero payment card columns or sensitive secrets in monetization tables', () => {
