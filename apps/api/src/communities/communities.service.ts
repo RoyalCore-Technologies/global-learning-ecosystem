@@ -517,4 +517,64 @@ export class CommunitiesService {
 
     return updatedMember as CommunityMember;
   }
+
+  /**
+   * Removes a member from community (Kick).
+   * LEAD, creator, or platform admin only. Creator cannot be kicked.
+   */
+  async removeMember(
+    communityId: string,
+    targetUserId: string,
+    actingUserId: string,
+    actingUserRole: UserRole
+  ): Promise<void> {
+    const client = this.databaseService.getClient();
+
+    const { data: community, error: commError } = await client
+      .from('communities')
+      .select('id, creator_id')
+      .eq('id', communityId)
+      .maybeSingle();
+
+    if (commError || !community) {
+      throw new NotFoundException(`Community with ID '${communityId}' not found.`);
+    }
+
+    const isCreator = community.creator_id === actingUserId;
+    const isAdmin = actingUserRole === 'ADMIN';
+
+    let isLead = false;
+    if (!isCreator && !isAdmin) {
+      const { data: actingMember } = await client
+        .from('community_members')
+        .select('role')
+        .eq('community_id', communityId)
+        .eq('user_id', actingUserId)
+        .maybeSingle();
+
+      if (actingMember?.role === 'LEAD') {
+        isLead = true;
+      }
+    }
+
+    if (!isCreator && !isAdmin && !isLead) {
+      throw new ForbiddenException('Only community leaders, the creator, or platform admins can remove members.');
+    }
+
+    // Protection: cannot kick original creator
+    if (community.creator_id === targetUserId) {
+      throw new BadRequestException('The original community creator cannot be removed from the community.');
+    }
+
+    const { error: deleteError } = await client
+      .from('community_members')
+      .delete()
+      .eq('community_id', communityId)
+      .eq('user_id', targetUserId);
+
+    if (deleteError) {
+      this.logger.error(`Failed to remove member: ${deleteError.message}`);
+      throw new InternalServerErrorException('Failed to remove member.');
+    }
+  }
 }

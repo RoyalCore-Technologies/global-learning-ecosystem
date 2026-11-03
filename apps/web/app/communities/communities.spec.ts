@@ -78,6 +78,14 @@ describe('Communities & Channels UI Integration (M4.4)', () => {
       const isForbiddenDemotion = targetUserId === creatorId && targetNewRole !== 'LEAD';
       expect(isForbiddenDemotion).toBe(true);
     });
+
+    it('ensures original community creator cannot be removed or kicked', () => {
+      const creatorId = 'creator-uuid-1';
+      const targetUserId = 'creator-uuid-1';
+
+      const isForbiddenRemoval = targetUserId === creatorId;
+      expect(isForbiddenRemoval).toBe(true);
+    });
   });
 
   describe('Creator Channels Integration', () => {

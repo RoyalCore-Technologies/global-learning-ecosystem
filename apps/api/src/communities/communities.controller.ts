@@ -226,4 +226,30 @@ export class CommunitiesController {
       message: 'Community member role updated successfully.',
     };
   }
+
+  @Delete(':id/members/:userId')
+  @UseGuards(JwtAuthGuard)
+  @HttpCode(HttpStatus.OK)
+  @ApiBearerAuth('JWT-auth')
+  @ApiOperation({ summary: 'Remove a member from community (Community LEAD, creator, or Platform Admin only)' })
+  @ApiResponse({ status: 200, description: 'Member removed successfully' })
+  @ApiResponse({ status: 400, description: 'Cannot remove creator' })
+  @ApiResponse({ status: 403, description: 'Forbidden' })
+  @ApiResponse({ status: 404, description: 'Community or member not found' })
+  async removeMember(
+    @Param('id') id: string,
+    @Param('userId') userId: string,
+    @CurrentUser() user: AuthenticatedUser
+  ) {
+    await this.communitiesService.removeMember(
+      id,
+      userId,
+      user.id,
+      user.role as UserRole
+    );
+    return {
+      success: true,
+      message: 'Community member removed successfully.',
+    };
+  }
 }

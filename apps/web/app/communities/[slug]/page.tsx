@@ -253,6 +253,24 @@ export default function CommunityDetailPage() {
     }
   };
 
+  // Kick member (LEAD/creator only)
+  const handleRemoveMember = async (targetUserId: string) => {
+    if (!community) return;
+    if (!confirm('Are you sure you want to remove this scholar from the circle?')) return;
+
+    try {
+      const res = await apiClient(`communities/${community.id}/members/${targetUserId}`, {
+        method: 'DELETE',
+      });
+      if (res.success) {
+        setMembers((prev) => prev.filter((m) => m.user_id !== targetUserId));
+      }
+    } catch (err) {
+      const apiErr = err as ApiError;
+      alert(apiErr.message || 'Failed to remove member.');
+    }
+  };
+
   if (isLoading) {
     return (
       <AppShell>
@@ -505,18 +523,28 @@ export default function CommunityDetailPage() {
                       {m.role}
                     </Badge>
 
-                    {/* Leader Controls: promote or change role */}
+                    {/* Leader Controls: promote, change role, or remove */}
                     {isLeadOrCreator && m.user_id !== community.creator_id && m.user_id !== currentUser?.id && (
-                      <select
-                        aria-label="Change member role"
-                        value={m.role}
-                        onChange={(e) => handlePromoteRole(m.user_id, e.target.value as CommunityRole)}
-                        className="text-[10px] bg-surface-subtle border border-surface-border rounded px-1.5 py-0.5 text-slate-300 focus:outline-none"
-                      >
-                        <option value="MEMBER">Member</option>
-                        <option value="MODERATOR">Mod</option>
-                        <option value="LEAD">Lead</option>
-                      </select>
+                      <div className="flex items-center gap-1">
+                        <select
+                          aria-label="Change member role"
+                          value={m.role}
+                          onChange={(e) => handlePromoteRole(m.user_id, e.target.value as CommunityRole)}
+                          className="text-[10px] bg-surface-subtle border border-surface-border rounded px-1.5 py-0.5 text-slate-300 focus:outline-none"
+                        >
+                          <option value="MEMBER">Member</option>
+                          <option value="MODERATOR">Mod</option>
+                          <option value="LEAD">Lead</option>
+                        </select>
+                        <button
+                          type="button"
+                          aria-label="Remove member"
+                          onClick={() => handleRemoveMember(m.user_id)}
+                          className="p-1 text-slate-500 hover:text-red-400 rounded transition-colors"
+                        >
+                          <UserMinus className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
                     )}
                   </div>
                 </div>

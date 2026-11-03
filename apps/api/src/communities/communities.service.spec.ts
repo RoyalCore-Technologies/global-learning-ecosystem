@@ -429,4 +429,50 @@ describe('CommunitiesService', () => {
       ).rejects.toThrow(BadRequestException);
     });
   });
+
+  describe('removeMember', () => {
+    it('allows community creator or LEAD to remove a member', async () => {
+      const comm = { id: 'comm-1', creator_id: 'creator-1' };
+
+      mockSupabaseClient.from.mockImplementation((table: string) => {
+        if (table === 'communities') {
+          return {
+            select: vi.fn().mockReturnThis(),
+            eq: vi.fn().mockReturnThis(),
+            maybeSingle: vi.fn().mockResolvedValue({ data: comm }),
+          };
+        }
+        if (table === 'community_members') {
+          return {
+            delete: vi.fn().mockReturnThis(),
+            eq: vi.fn().mockReturnThis(),
+          };
+        }
+        return {};
+      });
+
+      await expect(
+        service.removeMember('comm-1', 'bad-actor', 'creator-1', 'CREATOR' as UserRole)
+      ).resolves.not.toThrow();
+    });
+
+    it('prevents kicking the original community creator', async () => {
+      const comm = { id: 'comm-1', creator_id: 'creator-1' };
+
+      mockSupabaseClient.from.mockImplementation((table: string) => {
+        if (table === 'communities') {
+          return {
+            select: vi.fn().mockReturnThis(),
+            eq: vi.fn().mockReturnThis(),
+            maybeSingle: vi.fn().mockResolvedValue({ data: comm }),
+          };
+        }
+        return {};
+      });
+
+      await expect(
+        service.removeMember('comm-1', 'creator-1', 'admin-1', 'ADMIN' as UserRole)
+      ).rejects.toThrow(BadRequestException);
+    });
+  });
 });
