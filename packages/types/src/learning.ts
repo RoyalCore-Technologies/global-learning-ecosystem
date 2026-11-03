@@ -184,3 +184,40 @@ export interface EnrollCourseDto {
 export interface UpdateLessonProgressDto {
   is_completed: boolean;
 }
+
+export interface LessonProgressSummary {
+  id: string;
+  title: string;
+  slug: string;
+  order_index: number;
+  duration_minutes: number;
+  is_preview: boolean;
+  is_completed: boolean;
+  completed_at?: string | null;
+  last_accessed_at?: string | null;
+}
+
+export interface ModuleProgressSummary {
+  id: string;
+  title: string;
+  order_index: number;
+  total_lessons: number;
+  completed_lessons: number;
+  progress_percentage: number;
+  lessons: LessonProgressSummary[];
+}
+
+export interface CourseProgressSummary {
+  course_id: string;
+  course_title: string;
+  enrollment_id: string;
+  enrolled_at: string;
+  completed_at?: string | null;
+  is_completed: boolean;
+  total_lessons: number;
+  completed_lessons: number;
+  progress_percentage: number;
+  completed_lesson_ids: string[];
+  modules: ModuleProgressSummary[];
+}
+

@@ -12,6 +12,7 @@ import { CommentsModule } from './comments/comments.module.js';
 import { NotificationsModule } from './notifications/notifications.module.js';
 import { ModerationModule } from './moderation/moderation.module.js';
 import { CoursesModule } from './courses/courses.module.js';
+import { EnrollmentsModule } from './enrollments/enrollments.module.js';
 
 @Module({
   imports: [
@@ -35,6 +36,7 @@ import { CoursesModule } from './courses/courses.module.js';
     NotificationsModule,
     ModerationModule,
     CoursesModule,
+    EnrollmentsModule,
   ],
   providers: [
     {
