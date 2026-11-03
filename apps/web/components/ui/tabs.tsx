@@ -8,6 +8,7 @@ export interface TabItem {
   label: string;
   icon?: React.ReactNode;
   badge?: string | number;
+  count?: number;
 }
 
 export interface TabsProps {
@@ -52,14 +53,14 @@ export function Tabs({
             >
               {tab.icon && <span className="w-4 h-4">{tab.icon}</span>}
               <span>{tab.label}</span>
-              {tab.badge !== undefined && (
+              {(tab.badge !== undefined || tab.count !== undefined) && (
                 <span
                   className={cn(
                     'px-1.5 py-0.5 rounded-full text-[10px] font-bold',
                     isActive ? 'bg-brand-indigo-600 text-white' : 'bg-surface-elevated text-slate-400'
                   )}
                 >
-                  {tab.badge}
+                  {tab.badge !== undefined ? tab.badge : tab.count}
                 </span>
               )}
               {isActive && (
@@ -84,14 +85,14 @@ export function Tabs({
           >
             {tab.icon && <span className="w-4 h-4">{tab.icon}</span>}
             <span>{tab.label}</span>
-            {tab.badge !== undefined && (
+            {(tab.badge !== undefined || tab.count !== undefined) && (
               <span
                 className={cn(
                   'px-1.5 py-0.5 rounded-full text-[10px]',
                   isActive ? 'bg-white/20 text-white' : 'bg-surface-subtle text-slate-400'
                 )}
               >
-                {tab.badge}
+                {tab.badge !== undefined ? tab.badge : tab.count}
               </span>
             )}
           </button>

@@ -1,15 +1,27 @@
 import React from 'react';
 import { cn } from '@/lib/utils';
 
+export interface CardProps extends React.HTMLAttributes<HTMLDivElement> {
+  variant?: 'default' | 'elevated' | 'bordered';
+}
+
 export function Card({
   className,
+  variant = 'default',
   children,
   ...props
-}: React.HTMLAttributes<HTMLDivElement>) {
+}: CardProps) {
+  const variantStyles = {
+    default: 'bg-surface-card/70 border-surface-border',
+    elevated: 'bg-surface-elevated/70 border-surface-border/80 shadow-md',
+    bordered: 'bg-transparent border-surface-border',
+  }[variant] || 'bg-surface-card/70 border-surface-border';
+
   return (
     <div
       className={cn(
-        'rounded-2xl border border-surface-border bg-surface-card/70 backdrop-blur-md text-slate-100 shadow-sm transition-all',
+        'rounded-2xl border backdrop-blur-md text-slate-100 shadow-sm transition-all',
+        variantStyles,
         className
       )}
       {...props}

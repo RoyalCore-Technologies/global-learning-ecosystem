@@ -49,9 +49,14 @@ export async function apiClient<T = unknown>(
 
   // Format request URL through Next.js proxy rewrite or direct API host
   const cleanEndpoint = endpoint.replace(/^\/+/, '');
+  const path =
+    cleanEndpoint.startsWith('api/') || cleanEndpoint.startsWith('health')
+      ? cleanEndpoint
+      : `api/v1/${cleanEndpoint}`;
+
   const url = cleanEndpoint.startsWith('http')
     ? cleanEndpoint
-    : `/backend-api/${cleanEndpoint}`;
+    : `/backend-api/${path}`;
 
   try {
     const response = await fetch(url, {
@@ -80,21 +85,32 @@ export async function apiClient<T = unknown>(
       const errorJson = await response.json().catch(() => ({}));
       throw new ApiError(
         403,
-        'FORBIDDEN',
-        errorJson.message || 'Access Denied: You do not possess the required permissions for this action.'
+        errorJson.code || 'FORBIDDEN',
+        errorJson.message || 'Access Denied: You do not have permission to perform this action.'
       );
     }
 
-    // Parse JSON response
-    const json = await response.json().catch(() => null);
+    // Parse API response
+    const json = await response.json().catch(() => ({}));
 
     if (!response.ok) {
       throw new ApiError(
         response.status,
-        json?.error?.code || 'API_ERROR',
-        json?.message || `Request failed with HTTP status ${response.status}`,
-        json
+        json.code || 'API_ERROR',
+        json.message || `Request failed with status ${response.status}`,
+        json.details
       );
+    }
+
+    // Wrap in standard ApiResponse envelope if not already enveloped
+    if (typeof json === 'object' && json !== null && 'success' in json && 'data' in json) {
+      return {
+        ...json,
+        meta: {
+          timestamp: new Date().toISOString(),
+          ...(json.meta || {}),
+        },
+      };
     }
 
     return {
@@ -104,7 +120,7 @@ export async function apiClient<T = unknown>(
         timestamp: new Date().toISOString(),
       },
     };
-  } catch (error: any) {
+  } catch (error) {
     if (error instanceof ApiError) {
       throw error;
     }
@@ -112,7 +128,7 @@ export async function apiClient<T = unknown>(
     throw new ApiError(
       500,
       'NETWORK_ERROR',
-      error?.message || 'A network error occurred while communicating with the Learnova API.'
+      (error as Error).message || 'Failed to communicate with Learnova backend service.'
     );
   }
 }

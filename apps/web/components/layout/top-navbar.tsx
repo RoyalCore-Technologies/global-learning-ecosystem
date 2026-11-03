@@ -84,7 +84,7 @@ export function TopNavbar({ onToggleMobileMenu }: TopNavbarProps) {
         </Link>
 
         {/* Profile Avatar Quick Menu Link */}
-        <Link href="/dashboard/profile" className="ml-1 focus:outline-none">
+        <Link href="/profile/edit" className="ml-1 focus:outline-none" title="Profile & Notification Settings">
           <Avatar name="Alex Rivera" isOnline size="sm" />
         </Link>
       </div>
