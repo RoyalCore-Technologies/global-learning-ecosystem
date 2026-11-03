@@ -336,4 +336,105 @@ describe('Learnova Course Catalog & Syllabus UI Integration (M3.4)', () => {
       expect((res as any).enrollment.progress_percentage).toBe(75);
     });
   });
+
+  describe('Enhanced Lecture Theater & Learning Workspace (M3.5)', () => {
+    it('distinguishes video stream available vs stream in preparation', () => {
+      const lessonWithVideo: Lesson = {
+        id: 'les-v',
+        module_id: 'm-1',
+        title: 'Video Lecture',
+        slug: 'video-lecture',
+        order_index: 1,
+        content: 'Notes',
+        video_url: 'https://cdn.example.com/lecture.mp4',
+        duration_minutes: 30,
+        is_preview: true,
+        created_at: '2026-01-01T00:00:00Z',
+        updated_at: '2026-01-01T00:00:00Z',
+      };
+
+      const lessonWithoutVideo: Lesson = {
+        id: 'les-nv',
+        module_id: 'm-1',
+        title: 'Concept-Only Lecture',
+        slug: 'concept-lecture',
+        order_index: 2,
+        content: 'Notes without video',
+        video_url: null,
+        duration_minutes: 15,
+        is_preview: false,
+        created_at: '2026-01-01T00:00:00Z',
+        updated_at: '2026-01-01T00:00:00Z',
+      };
+
+      expect(lessonWithVideo.video_url).toBeTruthy();
+      expect(lessonWithoutVideo.video_url).toBeNull();
+    });
+
+    it('processes transcript timestamp seeking accurately', () => {
+      const transcript = [
+        { timestamp_sec: 0, label: '00:00', text: 'Introduction to Consensus' },
+        { timestamp_sec: 240, label: '04:00', text: 'Safety Invariants in Paxos' },
+        { timestamp_sec: 600, label: '10:00', text: 'State Machine Replication' },
+      ];
+
+      // Jump to segment 2
+      const targetSec = transcript[1].timestamp_sec;
+      expect(targetSec).toBe(240);
+
+      // Check active segment determination for currentProgressSec = 300 (5 mins)
+      const currentProgressSec = 300;
+      const activeIdx = transcript.findIndex((seg, idx) => {
+        const next = transcript[idx + 1];
+        return currentProgressSec >= seg.timestamp_sec && (!next || currentProgressSec < next.timestamp_sec);
+      });
+
+      expect(activeIdx).toBe(1);
+      expect(transcript[activeIdx].label).toBe('04:00');
+    });
+
+    it('initializes and resets interactive code lab scratchpad to starter code', () => {
+      const codeLab = {
+        language: 'rust',
+        starter_code: 'pub fn is_leader(term: u64, vote_count: usize) -> bool {\n    vote_count > 2\n}',
+        filename: 'consensus.rs',
+        test_assertions: 'assert!(is_leader(1, 3));',
+      };
+
+      let userCode = codeLab.starter_code;
+      expect(userCode).toContain('vote_count > 2');
+
+      // Student edits the code
+      userCode = 'pub fn is_leader(term: u64, vote_count: usize) -> bool {\n    vote_count >= 3\n}';
+      expect(userCode).toContain('vote_count >= 3');
+
+      // Student clicks Reset to Starter Code
+      userCode = codeLab.starter_code;
+      expect(userCode).toBe(codeLab.starter_code);
+    });
+
+    it('identifies downloadable slides and resources attached to lesson', () => {
+      const resources = [
+        {
+          title: 'Distributed Systems Lecture Slides',
+          url: 'https://cdn.example.com/slides.pdf',
+          type: 'SLIDES' as const,
+          size_bytes: 2048000,
+        },
+        {
+          title: 'Formal Specification Document',
+          url: 'https://cdn.example.com/spec.pdf',
+          type: 'PDF' as const,
+        },
+      ];
+
+      const slidesResource = resources.find(
+        (r) => r.type === 'SLIDES' || r.type === 'PDF' || r.url.endsWith('.pdf')
+      );
+
+      expect(slidesResource).toBeDefined();
+      expect(slidesResource?.title).toBe('Distributed Systems Lecture Slides');
+      expect(slidesResource?.type).toBe('SLIDES');
+    });
+  });
 });

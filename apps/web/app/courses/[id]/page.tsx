@@ -34,6 +34,11 @@ import {
   Sparkles,
   AlertCircle,
   Award,
+  Video,
+  Copy,
+  Check,
+  FileDown,
+  ExternalLink,
 } from 'lucide-react';
 
 export default function CourseLectureInterfacePage({
@@ -57,12 +62,16 @@ export default function CourseLectureInterfacePage({
 
   // Player & Lesson Navigation State
   const [activeLessonId, setActiveLessonId] = useState<string>('');
-  const [activeTab, setActiveTab] = useState<'notes' | 'lab' | 'transcript' | 'qa'>('notes');
+  const [activeTab, setActiveTab] = useState<'notes' | 'lab' | 'transcript' | 'resources' | 'qa'>('notes');
   const [isPlaying, setIsPlaying] = useState(false);
   const [playbackSpeed, setPlaybackSpeed] = useState('1x');
   const [currentProgressSec, setCurrentProgressSec] = useState(0);
+  const [videoDurationSec, setVideoDurationSec] = useState<number>(0);
   const [completedLessonMap, setCompletedLessonMap] = useState<Record<string, boolean>>({});
   const [isTogglingProgress, setIsTogglingProgress] = useState(false);
+  const [userCode, setUserCode] = useState<string>('');
+  const [copiedCode, setCopiedCode] = useState(false);
+  const videoRef = React.useRef<HTMLVideoElement>(null);
 
   // Fetch course details from GET /api/v1/courses/:slugOrId
   const fetchCourseData = useCallback(async () => {
@@ -210,12 +219,90 @@ export default function CourseLectureInterfacePage({
   const allLessons: Lesson[] = modules.flatMap((m) => m.lessons || []);
   const activeLesson: Lesson | undefined =
     allLessons.find((l) => l.id === activeLessonId) || allLessons[0];
+  const isAuthorizedToWatch = isEnrolled || !!activeLesson?.is_preview;
 
   const totalLessonsCount = allLessons.length;
   const completedLessonsCount = allLessons.filter((l) => completedLessonMap[l.id]).length;
   const progressPercent =
     enrollment?.progress_percentage ??
     (totalLessonsCount > 0 ? Math.round((completedLessonsCount / totalLessonsCount) * 100) : 0);
+
+  const effectiveDurationSec =
+    videoDurationSec > 0
+      ? videoDurationSec
+      : (activeLesson?.duration_minutes || 30) * 60;
+
+  const slidesResource = activeLesson?.resources?.find(
+    (r) => r.type === 'SLIDES' || r.type === 'PDF' || r.url?.endsWith('.pdf')
+  );
+
+  // Sync starter code & reset player when active lesson changes
+  useEffect(() => {
+    if (activeLesson?.code_lab?.starter_code) {
+      setUserCode(activeLesson.code_lab.starter_code);
+    } else {
+      setUserCode('');
+    }
+    setCurrentProgressSec(0);
+    setIsPlaying(false);
+    if (videoRef.current) {
+      videoRef.current.currentTime = 0;
+      videoRef.current.pause();
+    }
+  }, [activeLesson?.id, activeLesson?.code_lab?.starter_code]);
+
+  const handleTogglePlay = () => {
+    if (!videoRef.current) {
+      setIsPlaying(!isPlaying);
+      return;
+    }
+    if (isPlaying) {
+      videoRef.current.pause();
+    } else {
+      videoRef.current.play().catch(() => {});
+    }
+  };
+
+  const handleSeek = (seconds: number) => {
+    const clamped = Math.max(0, Math.min(seconds, effectiveDurationSec));
+    setCurrentProgressSec(clamped);
+    if (videoRef.current) {
+      videoRef.current.currentTime = clamped;
+    }
+  };
+
+  const handleSpeedChange = (speedStr: string) => {
+    setPlaybackSpeed(speedStr);
+    const num = parseFloat(speedStr);
+    if (videoRef.current && !isNaN(num)) {
+      videoRef.current.playbackRate = num;
+    }
+  };
+
+  const handleJumpToTimestamp = (timestampSec: number) => {
+    handleSeek(timestampSec);
+    if (videoRef.current) {
+      videoRef.current.play().catch(() => {});
+      setIsPlaying(true);
+    }
+  };
+
+  const handleCopyCode = async () => {
+    if (!userCode) return;
+    try {
+      await navigator.clipboard.writeText(userCode);
+      setCopiedCode(true);
+      setTimeout(() => setCopiedCode(false), 2000);
+    } catch {
+      // Fallback
+    }
+  };
+
+  const handleResetCode = () => {
+    if (activeLesson?.code_lab?.starter_code) {
+      setUserCode(activeLesson.code_lab.starter_code);
+    }
+  };
 
   const formatTime = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
@@ -387,8 +474,28 @@ export default function CourseLectureInterfacePage({
           <div className="lg:col-span-2 space-y-6">
             {/* 16:9 Lecture Player Canvas */}
             <div className="relative aspect-video rounded-2xl bg-black border border-surface-border overflow-hidden shadow-2xl flex flex-col justify-between group">
+              {/* Real Video Element if video_url is present and authorized */}
+              {isAuthorizedToWatch && activeLesson?.video_url ? (
+                <video
+                  ref={videoRef}
+                  src={activeLesson.video_url}
+                  className="absolute inset-0 w-full h-full object-contain z-0"
+                  onTimeUpdate={(e) => {
+                    setCurrentProgressSec(Math.floor(e.currentTarget.currentTime));
+                  }}
+                  onLoadedMetadata={(e) => {
+                    if (e.currentTarget.duration && !isNaN(e.currentTarget.duration)) {
+                      setVideoDurationSec(Math.floor(e.currentTarget.duration));
+                    }
+                  }}
+                  onPlay={() => setIsPlaying(true)}
+                  onPause={() => setIsPlaying(false)}
+                  onEnded={() => setIsPlaying(false)}
+                />
+              ) : null}
+
               {/* Top Video Overlay Bar */}
-              <div className="relative z-10 p-4 bg-gradient-to-b from-black/85 via-black/40 to-transparent flex items-center justify-between">
+              <div className="relative z-10 p-4 bg-gradient-to-b from-black/85 via-black/40 to-transparent flex items-center justify-between pointer-events-auto">
                 <div className="flex items-center gap-2">
                   <Badge variant={activeLesson?.is_preview ? 'success' : 'ai'}>
                     {activeLesson?.is_preview ? 'Free Preview Lecture' : 'Verified Syllabus Lecture'}
@@ -398,15 +505,26 @@ export default function CourseLectureInterfacePage({
                   </span>
                 </div>
                 <div className="flex items-center gap-2">
-                  <button
-                    aria-label="Download lecture slides"
-                    className="p-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white transition-colors text-xs flex items-center gap-1"
-                  >
-                    <Download className="w-3.5 h-3.5" />
-                    <span className="hidden sm:inline">Slides</span>
-                  </button>
+                  {slidesResource ? (
+                    <a
+                      href={slidesResource.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      aria-label="Download lecture slides"
+                      className="p-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white transition-colors text-xs flex items-center gap-1"
+                    >
+                      <Download className="w-3.5 h-3.5" />
+                      <span className="hidden sm:inline">Slides</span>
+                    </a>
+                  ) : null}
                   <button
                     aria-label="Share lesson link"
+                    onClick={() => {
+                      if (typeof window !== 'undefined') {
+                        navigator.clipboard.writeText(window.location.href);
+                        alert('Lecture link copied to clipboard!');
+                      }
+                    }}
                     className="p-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white transition-colors"
                   >
                     <Share2 className="w-3.5 h-3.5" />
@@ -415,10 +533,10 @@ export default function CourseLectureInterfacePage({
               </div>
 
               {/* Center Playback Canvas / Lock State */}
-              <div className="absolute inset-0 flex flex-col items-center justify-center p-6 text-center">
-                {!isEnrolled && !activeLesson?.is_preview ? (
+              <div className="absolute inset-0 flex flex-col items-center justify-center p-6 text-center z-10 pointer-events-none">
+                {!isAuthorizedToWatch ? (
                   /* Locked Lesson Screen */
-                  <div className="space-y-3 max-w-md bg-black/75 p-6 rounded-2xl border border-white/10 backdrop-blur-md">
+                  <div className="space-y-3 max-w-md bg-black/85 p-6 rounded-2xl border border-white/10 backdrop-blur-md pointer-events-auto">
                     <div className="w-12 h-12 rounded-2xl bg-surface-elevated text-amber-400 mx-auto flex items-center justify-center border border-surface-border">
                       <Lock className="w-6 h-6" />
                     </div>
@@ -432,12 +550,25 @@ export default function CourseLectureInterfacePage({
                         : `Enroll in Track ($${(course.price_cents / 100).toFixed(2)})`}
                     </Button>
                   </div>
+                ) : !activeLesson?.video_url ? (
+                  /* Honest Video Stream In Preparation Screen */
+                  <div className="space-y-2 max-w-md bg-black/75 p-6 rounded-2xl border border-white/10 backdrop-blur-sm pointer-events-auto">
+                    <div className="w-12 h-12 rounded-2xl bg-surface-elevated text-slate-400 mx-auto flex items-center justify-center border border-surface-border">
+                      <Video className="w-6 h-6" />
+                    </div>
+                    <h3 className="text-sm font-bold text-white">Lecture Stream in Preparation</h3>
+                    <p className="text-xs text-slate-300">
+                      This syllabus lecture does not have an attached media stream yet. Review the verified concept notes, interactive code lab, and transcript below.
+                    </p>
+                  </div>
                 ) : (
                   /* Active Player Controls */
                   <button
-                    onClick={() => setIsPlaying(!isPlaying)}
+                    onClick={handleTogglePlay}
                     aria-label={isPlaying ? 'Pause lecture' : 'Play lecture'}
-                    className="w-16 h-16 rounded-full bg-brand-indigo-600/90 hover:bg-brand-indigo-500 text-white flex items-center justify-center shadow-xl hover:scale-105 transition-all backdrop-blur-sm"
+                    className={`w-16 h-16 rounded-full bg-brand-indigo-600/90 hover:bg-brand-indigo-500 text-white flex items-center justify-center shadow-xl hover:scale-105 transition-all backdrop-blur-sm pointer-events-auto ${
+                      isPlaying ? 'opacity-0 group-hover:opacity-100' : 'opacity-100'
+                    }`}
                   >
                     {isPlaying ? <Pause className="w-7 h-7" /> : <Play className="w-7 h-7 ml-1" />}
                   </button>
@@ -445,23 +576,20 @@ export default function CourseLectureInterfacePage({
               </div>
 
               {/* Bottom Video Controls Scrubber Bar */}
-              <div className="relative z-10 p-4 bg-gradient-to-t from-black/90 via-black/50 to-transparent space-y-2">
+              <div className="relative z-10 p-4 bg-gradient-to-t from-black/90 via-black/50 to-transparent space-y-2 pointer-events-auto">
                 <div
                   className="w-full h-1.5 rounded-full bg-white/20 cursor-pointer overflow-hidden relative"
                   onClick={(e) => {
                     const rect = e.currentTarget.getBoundingClientRect();
                     const clickX = e.clientX - rect.left;
                     const percent = clickX / rect.width;
-                    const durationSec = (activeLesson?.duration_minutes || 30) * 60;
-                    setCurrentProgressSec(Math.round(percent * durationSec));
+                    handleSeek(Math.round(percent * effectiveDurationSec));
                   }}
                 >
                   <div
                     className="h-full bg-brand-indigo-500 rounded-full"
                     style={{
-                      width: `${
-                        ((currentProgressSec / ((activeLesson?.duration_minutes || 30) * 60)) * 100) || 0
-                      }%`,
+                      width: `${((currentProgressSec / effectiveDurationSec) * 100) || 0}%`,
                     }}
                   />
                 </div>
@@ -469,19 +597,21 @@ export default function CourseLectureInterfacePage({
                 <div className="flex items-center justify-between text-xs text-white">
                   <div className="flex items-center gap-3">
                     <button
-                      onClick={() => setIsPlaying(!isPlaying)}
+                      onClick={handleTogglePlay}
                       className="hover:text-brand-indigo-400 transition-colors"
+                      aria-label={isPlaying ? 'Pause' : 'Play'}
                     >
                       {isPlaying ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
                     </button>
                     <button
-                      onClick={() => setCurrentProgressSec(Math.max(0, currentProgressSec - 10))}
+                      onClick={() => handleSeek(currentProgressSec - 10)}
                       className="hover:text-brand-indigo-400 transition-colors"
+                      aria-label="Rewind 10 seconds"
                     >
                       <RotateCcw className="w-4 h-4" />
                     </button>
                     <span className="font-mono text-[11px] text-slate-300">
-                      {formatTime(currentProgressSec)} / {formatTime((activeLesson?.duration_minutes || 30) * 60)}
+                      {formatTime(currentProgressSec)} / {formatTime(effectiveDurationSec)}
                     </span>
                   </div>
 
@@ -490,7 +620,7 @@ export default function CourseLectureInterfacePage({
                       {['1x', '1.25x', '1.5x', '2x'].map((spd) => (
                         <button
                           key={spd}
-                          onClick={() => setPlaybackSpeed(spd)}
+                          onClick={() => handleSpeedChange(spd)}
                           className={`px-1 rounded ${
                             playbackSpeed === spd
                               ? 'bg-brand-indigo-500 text-white font-bold'
@@ -501,7 +631,14 @@ export default function CourseLectureInterfacePage({
                         </button>
                       ))}
                     </div>
-                    <Maximize2 className="w-4 h-4 text-slate-300 hover:text-white cursor-pointer" />
+                    <Maximize2
+                      className="w-4 h-4 text-slate-300 hover:text-white cursor-pointer"
+                      onClick={() => {
+                        if (videoRef.current?.requestFullscreen) {
+                          videoRef.current.requestFullscreen();
+                        }
+                      }}
+                    />
                   </div>
                 </div>
               </div>
@@ -514,6 +651,7 @@ export default function CourseLectureInterfacePage({
                   { id: 'notes' as const, label: 'Concept Notes & Proofs', icon: BookOpen },
                   { id: 'lab' as const, label: 'Interactive Code Lab', icon: Code2 },
                   { id: 'transcript' as const, label: 'Lecture Transcript', icon: FileText },
+                  { id: 'resources' as const, label: 'Resources & Downloads', icon: FileDown },
                   { id: 'qa' as const, label: 'Peer Q&A & Endorsements', icon: MessageSquare },
                 ].map((t) => {
                   const Icon = t.icon;
@@ -572,25 +710,80 @@ export default function CourseLectureInterfacePage({
               {/* Tab 2: Code Lab */}
               {activeTab === 'lab' && (
                 <div className="space-y-4">
-                  <div className="flex items-center justify-between">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                     <div>
                       <h2 className="text-sm font-bold text-white flex items-center gap-2">
                         <Code2 className="w-4 h-4 text-brand-cyan-400" /> Verifiable Assignment Playground
                       </h2>
                       <p className="text-xs text-slate-400">
-                        Inspect the implementation and verify safety conditions.
+                        Interactive code scratchpad with formal invariant checks.
                       </p>
                     </div>
+                    {activeLesson?.code_lab && (
+                      <div className="flex items-center gap-2">
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={handleResetCode}
+                          leftIcon={<RotateCcw className="w-3 h-3" />}
+                        >
+                          Reset
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          onClick={handleCopyCode}
+                          leftIcon={copiedCode ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                        >
+                          {copiedCode ? 'Copied!' : 'Copy Code'}
+                        </Button>
+                      </div>
+                    )}
                   </div>
 
                   {activeLesson?.code_lab ? (
-                    <CodeBlock
-                      code={activeLesson.code_lab.starter_code}
-                      language={activeLesson.code_lab.language}
-                      filename={activeLesson.code_lab.filename || 'solution'}
-                    />
+                    <div className="space-y-3">
+                      <div className="rounded-xl border border-surface-border bg-surface-subtle overflow-hidden">
+                        <div className="px-4 py-2 bg-surface-base border-b border-surface-border flex items-center justify-between text-xs">
+                          <span className="font-mono text-slate-300 font-semibold flex items-center gap-2">
+                            <Code2 className="w-3.5 h-3.5 text-brand-cyan-400" />
+                            {activeLesson.code_lab.filename || 'solution'}
+                          </span>
+                          <Badge variant="tier" className="text-[10px] uppercase">
+                            {activeLesson.code_lab.language}
+                          </Badge>
+                        </div>
+                        <textarea
+                          value={userCode}
+                          onChange={(e) => setUserCode(e.target.value)}
+                          spellCheck={false}
+                          className="w-full h-64 p-4 font-mono text-xs bg-surface-subtle text-slate-100 resize-y focus:outline-none focus:ring-1 focus:ring-brand-indigo-500/50 leading-relaxed"
+                          placeholder="Write your solution here..."
+                        />
+                      </div>
+
+                      {activeLesson.code_lab.test_assertions && (
+                        <Card variant="elevated" className="p-4 space-y-2">
+                          <h3 className="text-xs font-bold text-white flex items-center gap-2">
+                            <Sparkles className="w-3.5 h-3.5 text-amber-400" /> Target Invariants &amp; Test Assertions
+                          </h3>
+                          <CodeBlock
+                            code={activeLesson.code_lab.test_assertions}
+                            language={activeLesson.code_lab.language}
+                            filename="assertions"
+                          />
+                        </Card>
+                      )}
+
+                      <div className="p-3 rounded-lg bg-surface-elevated/40 border border-surface-border/60 text-[11px] text-slate-400 flex items-start gap-2">
+                        <Sparkles className="w-4 h-4 text-brand-indigo-400 shrink-0 mt-0.5" />
+                        <p>
+                          <strong>Sandbox Scratchpad:</strong> Code changes are preserved locally during your session. Remote isolated container execution and proof verification are scheduled for Milestone M5.
+                        </p>
+                      </div>
+                    </div>
                   ) : (
-                    <Card className="p-6 text-center text-xs text-slate-400">
+                    <Card className="p-8 text-center text-xs text-slate-400">
                       No interactive code lab specified for this lecture.
                     </Card>
                   )}
@@ -600,23 +793,38 @@ export default function CourseLectureInterfacePage({
               {/* Tab 3: Transcript */}
               {activeTab === 'transcript' && (
                 <Card variant="elevated" className="p-5 space-y-3">
-                  <h2 className="text-sm font-bold text-white pb-2 border-b border-surface-border/60">
-                    Interactive Timestamped Transcript
-                  </h2>
+                  <div className="flex items-center justify-between pb-2 border-b border-surface-border/60">
+                    <h2 className="text-sm font-bold text-white flex items-center gap-2">
+                      <FileText className="w-4 h-4 text-brand-indigo-400" /> Interactive Timestamped Transcript
+                    </h2>
+                    <span className="text-[10px] text-slate-400">Click timestamp to jump player</span>
+                  </div>
                   {activeLesson?.transcript && activeLesson.transcript.length > 0 ? (
                     <div className="space-y-2 text-xs">
-                      {activeLesson.transcript.map((seg, idx) => (
-                        <div
-                          key={idx}
-                          onClick={() => setCurrentProgressSec(seg.timestamp_sec)}
-                          className="p-2.5 rounded-lg hover:bg-surface-elevated cursor-pointer transition-colors flex items-start gap-3 group"
-                        >
-                          <span className="font-mono text-brand-indigo-400 group-hover:underline shrink-0">
-                            {seg.label}
-                          </span>
-                          <p className="text-slate-300 leading-relaxed">{seg.text}</p>
-                        </div>
-                      ))}
+                      {activeLesson.transcript.map((seg, idx) => {
+                        const nextSeg = activeLesson.transcript?.[idx + 1];
+                        const isActive =
+                          currentProgressSec >= seg.timestamp_sec &&
+                          (!nextSeg || currentProgressSec < nextSeg.timestamp_sec);
+
+                        return (
+                          <div
+                            key={idx}
+                            onClick={() => handleJumpToTimestamp(seg.timestamp_sec)}
+                            className={`p-2.5 rounded-xl cursor-pointer transition-all flex items-start gap-3 border ${
+                              isActive
+                                ? 'bg-brand-indigo-950/40 border-brand-indigo-500/50 text-white font-medium shadow-sm'
+                                : 'hover:bg-surface-elevated border-transparent text-slate-300'
+                            }`}
+                          >
+                            <span className="font-mono text-brand-indigo-400 font-semibold shrink-0 flex items-center gap-1">
+                              <Clock className="w-3 h-3" />
+                              {seg.label}
+                            </span>
+                            <p className="leading-relaxed">{seg.text}</p>
+                          </div>
+                        );
+                      })}
                     </div>
                   ) : (
                     <p className="text-xs text-slate-400">
@@ -626,7 +834,56 @@ export default function CourseLectureInterfacePage({
                 </Card>
               )}
 
-              {/* Tab 4: Q&A */}
+              {/* Tab 4: Resources */}
+              {activeTab === 'resources' && (
+                <Card variant="elevated" className="p-5 space-y-4">
+                  <div className="flex items-center justify-between pb-2 border-b border-surface-border/60">
+                    <h2 className="text-sm font-bold text-white flex items-center gap-2">
+                      <FileDown className="w-4 h-4 text-brand-indigo-400" /> Lecture Resources &amp; Downloads
+                    </h2>
+                    <span className="text-xs text-slate-400 font-mono">
+                      {activeLesson?.resources?.length || 0} Assets
+                    </span>
+                  </div>
+
+                  {activeLesson?.resources && activeLesson.resources.length > 0 ? (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      {activeLesson.resources.map((res, idx) => (
+                        <a
+                          key={idx}
+                          href={res.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="p-3 rounded-xl bg-surface-subtle hover:bg-surface-elevated border border-surface-border hover:border-brand-indigo-500/50 transition-all flex items-center justify-between group"
+                        >
+                          <div className="space-y-1 min-w-0 pr-2">
+                            <div className="flex items-center gap-2">
+                              <Badge variant="tier" className="text-[9px] uppercase">
+                                {res.type}
+                              </Badge>
+                              {res.size_bytes && (
+                                <span className="text-[10px] font-mono text-slate-400">
+                                  {(res.size_bytes / 1024).toFixed(1)} KB
+                                </span>
+                              )}
+                            </div>
+                            <h3 className="text-xs font-semibold text-white group-hover:text-brand-indigo-300 truncate">
+                              {res.title}
+                            </h3>
+                          </div>
+                          <Download className="w-4 h-4 text-slate-400 group-hover:text-white shrink-0" />
+                        </a>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-xs text-slate-400 py-4 text-center">
+                      No external resources or slides attached to this lecture.
+                    </p>
+                  )}
+                </Card>
+              )}
+
+              {/* Tab 5: Q&A */}
               {activeTab === 'qa' && (
                 <Card variant="elevated" className="p-5 space-y-4">
                   <div className="flex items-center justify-between pb-2 border-b border-surface-border/60">
