@@ -1,11 +1,12 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { AppShell } from '@/components/layout/app-shell';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Avatar } from '@/components/ui/avatar';
+import { getSupabaseBrowserClient } from '@/lib/supabase/client';
 import {
   Sparkles,
   BookOpen,
@@ -22,9 +23,31 @@ import {
 import Link from 'next/link';
 
 export default function DashboardPage() {
+  const [userName, setUserName] = useState<string>('Scholar');
+  const [userRole, setUserRole] = useState<string>('STUDENT');
   const [aiPrompt, setAiPrompt] = useState('');
   const [isAskingAi, setIsAskingAi] = useState(false);
   const [aiResponse, setAiResponse] = useState<string | null>(null);
+
+  useEffect(() => {
+    try {
+      const supabase = getSupabaseBrowserClient();
+      supabase.auth.getSession().then(({ data: { session } }) => {
+        if (session?.user) {
+          const name =
+            (session.user.user_metadata?.display_name as string) ||
+            (session.user.user_metadata?.full_name as string) ||
+            session.user.email?.split('@')[0] ||
+            'Scholar';
+          setUserName(name);
+          const role = (session.user.app_metadata?.role as string) || 'STUDENT';
+          setUserRole(role);
+        }
+      });
+    } catch {
+      // Unauthenticated
+    }
+  }, []);
 
   const handleAskAi = (e: React.FormEvent) => {
     e.preventDefault();
@@ -125,14 +148,14 @@ export default function DashboardPage() {
         <div className="relative overflow-hidden rounded-3xl p-6 sm:p-8 bg-gradient-to-r from-brand-indigo-950/80 via-surface-card to-surface-card border border-brand-indigo-500/30 shadow-xl">
           <div className="relative z-10 max-w-2xl space-y-3">
             <div className="flex flex-wrap items-center gap-2">
-              <Badge roleType="STUDENT" isVerified />
+              <Badge roleType={userRole as any} isVerified={userRole !== 'STUDENT'} />
               <Badge variant="secondary" className="text-slate-300">
                 Active Track: Computer Science & Systems
               </Badge>
             </div>
 
             <h1 className="text-2xl sm:text-4xl font-extrabold text-white tracking-tight">
-              Welcome back, Alex.
+              Welcome back, {userName}.
             </h1>
 
             <p className="text-sm text-slate-300 leading-relaxed">

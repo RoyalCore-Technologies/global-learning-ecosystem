@@ -4,7 +4,7 @@ import { cn } from '@/lib/utils';
 export interface AvatarProps extends React.HTMLAttributes<HTMLDivElement> {
   src?: string | null;
   name?: string;
-  size?: 'sm' | 'md' | 'lg' | 'xl';
+  size?: 'xs' | 'sm' | 'md' | 'lg' | 'xl';
   isOnline?: boolean;
   roleBadge?: string;
 }
@@ -21,6 +21,7 @@ export function Avatar({
   const [imageError, setImageError] = React.useState(false);
 
   const sizeClasses = {
+    xs: 'w-6 h-6 text-[10px]',
     sm: 'w-8 h-8 text-xs',
     md: 'w-10 h-10 text-sm',
     lg: 'w-12 h-12 text-base',

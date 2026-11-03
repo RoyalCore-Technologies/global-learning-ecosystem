@@ -6,3 +6,6 @@ export * from './avatar';
 export * from './dialog';
 export * from './feedback';
 export * from './tabs';
+export * from './code-block';
+export * from './progress';
+export * from './accordion';

@@ -9,6 +9,7 @@ import { Badge } from '@/components/ui/badge';
 import { Avatar } from '@/components/ui/avatar';
 import { Tabs } from '@/components/ui/tabs';
 import { EmptyState, LoadingSpinner } from '@/components/ui/feedback';
+import { CodeBlock } from '@/components/ui/code-block';
 import { apiClient } from '@/lib/api-client';
 import { getSupabaseBrowserClient } from '@/lib/supabase/client';
 import type { Post } from '@platform/types';
@@ -27,6 +28,11 @@ import {
   FolderGit2,
   AlertCircle,
   PlusCircle,
+  Send,
+  X,
+  TrendingUp,
+  ShieldCheck,
+  Award,
 } from 'lucide-react';
 
 export default function ExploreFeedPage() {
@@ -39,6 +45,14 @@ export default function ExploreFeedPage() {
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [currentUserRole, setCurrentUserRole] = useState<string>('STUDENT');
   const [actionFeedback, setActionFeedback] = useState<string | null>(null);
+
+  // New Post Composer State
+  const [isComposing, setIsComposing] = useState(false);
+  const [composeTitle, setComposeTitle] = useState('');
+  const [composeContent, setComposeContent] = useState('');
+  const [composeType, setComposeType] = useState<'ARTICLE' | 'TUTORIAL' | 'QUESTION' | 'DISCUSSION'>('ARTICLE');
+  const [composeCategory, setComposeCategory] = useState('systems');
+  const [isSubmittingPost, setIsSubmittingPost] = useState(false);
 
   const categories = [
     { id: 'all', label: 'All Knowledge' },
@@ -182,8 +196,172 @@ export default function ExploreFeedPage() {
     }
   };
 
+  // Handle Post Publishing
+  const handlePublishPost = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!composeTitle.trim() || !composeContent.trim()) return;
+
+    if (!currentUserId) {
+      setActionFeedback('Please sign in to publish a knowledge post.');
+      setTimeout(() => setActionFeedback(null), 3000);
+      return;
+    }
+
+    setIsSubmittingPost(true);
+    try {
+      const slug = composeTitle
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/(^-|-$)+/g, '')
+        .slice(0, 80) + `-${Date.now().toString(36)}`;
+
+      const res = await apiClient<Post>('posts', {
+        method: 'POST',
+        body: JSON.stringify({
+          title: composeTitle.trim(),
+          slug,
+          content: composeContent.trim(),
+          type: composeType,
+          category: composeCategory,
+        }),
+      });
+
+      if (res.data) {
+        setPosts((prev) => [res.data!, ...prev]);
+        setComposeTitle('');
+        setComposeContent('');
+        setIsComposing(false);
+        setActionFeedback('Insight published successfully to the Knowledge Feed!');
+        setTimeout(() => setActionFeedback(null), 4000);
+      }
+    } catch (err: any) {
+      setActionFeedback(err.message || 'Failed to publish post.');
+      setTimeout(() => setActionFeedback(null), 4000);
+    } finally {
+      setIsSubmittingPost(false);
+    }
+  };
+
+  const getPostTypeIcon = (type: string) => {
+    switch (type) {
+      case 'TUTORIAL':
+        return <Code2 className="w-3.5 h-3.5 text-brand-indigo-400" />;
+      case 'ARTICLE':
+        return <BookOpen className="w-3.5 h-3.5 text-brand-cyan-400" />;
+      case 'QUESTION':
+        return <HelpCircle className="w-3.5 h-3.5 text-amber-400" />;
+      default:
+        return <FolderGit2 className="w-3.5 h-3.5 text-brand-emerald-400" />;
+    }
+  };
+
+  // Right-side Academic Scaffolding Panel (Stitch Design)
+  const rightAside = (
+    <div className="space-y-6">
+      {/* Knowledge Grounding Standard */}
+      <Card variant="elevated" className="border-brand-indigo-500/30 p-5 space-y-3">
+        <div className="flex items-center gap-2 text-brand-indigo-300 font-semibold text-xs tracking-wide uppercase">
+          <ShieldCheck className="w-4 h-4 text-brand-indigo-400" />
+          Academic Grounding Standard
+        </div>
+        <p className="text-xs text-slate-300 leading-relaxed">
+          Learnova replaces engagement algorithms with <span className="text-white font-semibold">peer accuracy verification</span>.
+          Educators and researchers mathematically validate preprints and insights before they reach student curriculums.
+        </p>
+        <div className="pt-2 border-t border-surface-border/60 flex items-center justify-between text-[11px] text-slate-400">
+          <span>Your Role:</span>
+          <Badge roleType={currentUserRole as any} isVerified={currentUserRole !== 'STUDENT'} />
+        </div>
+      </Card>
+
+      {/* Trending Research Focus */}
+      <Card variant="elevated" className="border-surface-border p-5 space-y-3">
+        <div className="flex items-center justify-between">
+          <span className="text-xs font-semibold text-white flex items-center gap-1.5">
+            <TrendingUp className="w-3.5 h-3.5 text-brand-cyan-400" /> Trending Topics
+          </span>
+          <span className="text-[10px] text-slate-500 font-mono">Peer-Curated</span>
+        </div>
+        <div className="flex flex-wrap gap-1.5 pt-1">
+          {[
+            { tag: 'distributed-systems', label: 'Distributed Systems' },
+            { tag: 'flash-attention', label: 'FlashAttention-3' },
+            { tag: 'formal-methods', label: 'TLA+ Verification' },
+            { tag: 'byzantine-faults', label: 'Byzantine Faults' },
+            { tag: 'compilers', label: 'Rust Compiler Kernels' },
+            { tag: 'neural-networks', label: 'Transformer Attention' },
+          ].map((item) => (
+            <button
+              key={item.tag}
+              onClick={() => {
+                setSearchQuery(item.tag);
+              }}
+              className="px-2.5 py-1 rounded-lg text-[11px] font-mono bg-surface-subtle hover:bg-surface-elevated border border-surface-border text-slate-300 hover:text-brand-cyan-300 transition-colors"
+            >
+              #{item.label}
+            </button>
+          ))}
+        </div>
+      </Card>
+
+      {/* Top Endorsed Scholars */}
+      <Card variant="elevated" className="border-surface-border p-5 space-y-3">
+        <div className="flex items-center justify-between">
+          <span className="text-xs font-semibold text-white flex items-center gap-1.5">
+            <Award className="w-3.5 h-3.5 text-amber-400" /> Top Endorsed Scholars
+          </span>
+          <span className="text-[10px] text-slate-500 font-mono">Accuracy &gt; 95%</span>
+        </div>
+        <div className="space-y-3 pt-1">
+          {[
+            {
+              name: 'Prof. Marcus Vance',
+              username: 'marcus_vance',
+              role: 'EDUCATOR' as const,
+              inst: 'Carnegie Mellon University',
+              endorsements: '2,480',
+            },
+            {
+              name: 'Dr. Sarah Lin',
+              username: 'sarah_lin',
+              role: 'RESEARCHER' as const,
+              inst: 'Stanford AI Lab',
+              endorsements: '3,120',
+            },
+            {
+              name: 'Dr. Elena Rostova',
+              username: 'elena_rostova',
+              role: 'RESEARCHER' as const,
+              inst: 'ETH Zurich',
+              endorsements: '1,890',
+            },
+          ].map((scholar) => (
+            <Link
+              key={scholar.username}
+              href={`/profile/${scholar.username}`}
+              className="flex items-center justify-between p-2 rounded-xl hover:bg-surface-subtle/60 transition-colors group"
+            >
+              <div className="flex items-center gap-2.5 min-w-0">
+                <Avatar name={scholar.name} size="sm" />
+                <div className="min-w-0">
+                  <p className="text-xs font-semibold text-white truncate group-hover:text-brand-indigo-300 transition-colors">
+                    {scholar.name}
+                  </p>
+                  <p className="text-[10px] text-slate-400 truncate">{scholar.inst}</p>
+                </div>
+              </div>
+              <span className="text-[10px] font-mono text-emerald-400 shrink-0">
+                {scholar.endorsements} ✓
+              </span>
+            </Link>
+          ))}
+        </div>
+      </Card>
+    </div>
+  );
+
   return (
-    <AppShell>
+    <AppShell rightAside={rightAside}>
       <div className="space-y-6 max-w-4xl mx-auto pb-16">
         {/* Knowledge Feed Header */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-2 border-b border-surface-border/60">
@@ -228,69 +406,199 @@ export default function ExploreFeedPage() {
           </div>
         </div>
 
-        {/* Global Action Toast Banner */}
+        {/* Global Feedback Banner */}
         {actionFeedback && (
-          <div className="p-3.5 rounded-xl bg-surface-elevated border border-surface-border flex items-center gap-2 text-xs text-brand-indigo-200">
+          <div className="p-3 rounded-xl bg-brand-indigo-950/70 border border-brand-indigo-500/40 text-xs text-brand-indigo-200 flex items-center gap-2 animate-in fade-in duration-200">
             <AlertCircle className="w-4 h-4 text-brand-indigo-400 shrink-0" />
             <span>{actionFeedback}</span>
           </div>
         )}
 
-        {/* Academic Discipline Tabs */}
-        <Tabs
-          tabs={categories}
-          activeTab={activeCategory}
-          onChange={(id) => setActiveCategory(id)}
-        />
+        {/* Inline Post Composer (Stitch Design) */}
+        {isComposing ? (
+          <Card variant="elevated" className="border-brand-indigo-500/40 p-5 space-y-4 shadow-xl">
+            <div className="flex items-center justify-between border-b border-surface-border/60 pb-3">
+              <span className="text-sm font-semibold text-white flex items-center gap-2">
+                <PlusCircle className="w-4 h-4 text-brand-indigo-400" /> Publish Knowledge Insight
+              </span>
+              <button
+                type="button"
+                onClick={() => setIsComposing(false)}
+                className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-surface-elevated transition-colors"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
 
-        {/* Feed Sorting & Search Controls */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-surface-elevated/40 p-3 rounded-2xl border border-surface-border">
-          <div className="flex items-center gap-1.5">
-            <button
-              onClick={() => setActiveSort('recent')}
-              className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-colors ${
-                activeSort === 'recent'
-                  ? 'bg-brand-indigo-600 text-white'
-                  : 'text-slate-400 hover:text-white hover:bg-surface-elevated'
-              }`}
-            >
-              Recent Discourse
-            </button>
-            <button
-              onClick={() => setActiveSort('endorsed')}
-              className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-colors ${
-                activeSort === 'endorsed'
-                  ? 'bg-brand-indigo-600 text-white'
-                  : 'text-slate-400 hover:text-white hover:bg-surface-elevated'
-              }`}
-            >
-              Peer Endorsed
-            </button>
-            <button
-              onClick={() => setActiveSort('following')}
-              className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-colors ${
-                activeSort === 'following'
-                  ? 'bg-brand-indigo-600 text-white'
-                  : 'text-slate-400 hover:text-white hover:bg-surface-elevated'
-              }`}
-            >
-              Following
-            </button>
+            <form onSubmit={handlePublishPost} className="space-y-4">
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">
+                  Insight Title or Thesis
+                </label>
+                <input
+                  type="text"
+                  required
+                  placeholder="e.g. Formal Proof of Safety in Raft Consensus under Network Partitions"
+                  value={composeTitle}
+                  onChange={(e) => setComposeTitle(e.target.value)}
+                  className="w-full px-3.5 py-2.5 rounded-xl bg-surface-subtle/80 border border-surface-border text-sm text-white placeholder:text-slate-500 focus:outline-none focus:border-brand-indigo-500 focus:ring-1 focus:ring-brand-indigo-500 transition-all"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1">
+                    Publication Type
+                  </label>
+                  <select
+                    value={composeType}
+                    onChange={(e) => setComposeType(e.target.value as any)}
+                    className="w-full px-3 py-2 rounded-xl bg-surface-subtle/80 border border-surface-border text-xs text-white focus:outline-none focus:border-brand-indigo-500"
+                  >
+                    <option value="ARTICLE">Research Article</option>
+                    <option value="TUTORIAL">Educational Tutorial</option>
+                    <option value="QUESTION">Academic Inquiry / Question</option>
+                    <option value="DISCUSSION">Peer Discussion</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1">
+                    Academic Field
+                  </label>
+                  <select
+                    value={composeCategory}
+                    onChange={(e) => setComposeCategory(e.target.value)}
+                    className="w-full px-3 py-2 rounded-xl bg-surface-subtle/80 border border-surface-border text-xs text-white focus:outline-none focus:border-brand-indigo-500"
+                  >
+                    <option value="systems">Distributed Systems</option>
+                    <option value="ai">AI & Machine Learning</option>
+                    <option value="cs">Computer Science</option>
+                    <option value="math">Mathematics & Logic</option>
+                    <option value="security">Information Security</option>
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">
+                  Insight Content (Supports Markdown & Code)
+                </label>
+                <textarea
+                  required
+                  rows={4}
+                  placeholder="Explain the mathematical formulation, proof invariant, or architectural solution..."
+                  value={composeContent}
+                  onChange={(e) => setComposeContent(e.target.value)}
+                  className="w-full px-3.5 py-2.5 rounded-xl bg-surface-subtle/80 border border-surface-border text-xs text-white placeholder:text-slate-500 focus:outline-none focus:border-brand-indigo-500 focus:ring-1 focus:ring-brand-indigo-500 transition-all font-mono"
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setIsComposing(false)}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="submit"
+                  size="sm"
+                  variant="primary"
+                  isLoading={isSubmittingPost}
+                  rightIcon={<Send className="w-3.5 h-3.5" />}
+                >
+                  Publish to Peer Network
+                </Button>
+              </div>
+            </form>
+          </Card>
+        ) : (
+          <div
+            onClick={() => setIsComposing(true)}
+            className="p-4 rounded-2xl border border-surface-border/80 bg-surface-card/60 hover:bg-surface-elevated/40 hover:border-brand-indigo-500/40 cursor-pointer transition-all flex items-center justify-between gap-4"
+          >
+            <div className="flex items-center gap-3">
+              <Avatar name="Scholar" size="sm" />
+              <span className="text-xs text-slate-400">
+                Share a research insight, mathematical derivation, or peer inquiry...
+              </span>
+            </div>
+            <Button size="sm" variant="secondary" leftIcon={<PlusCircle className="w-3.5 h-3.5" />}>
+              Create Insight
+            </Button>
+          </div>
+        )}
+
+        {/* Feed Sorting & Discipline Navigation */}
+        <div className="space-y-3">
+          <div className="flex items-center justify-between gap-4 flex-wrap">
+            <div className="flex items-center gap-1.5 p-1 bg-surface-elevated/50 rounded-xl border border-surface-border text-xs">
+              <button
+                onClick={() => setActiveSort('recent')}
+                className={`px-3 py-1.5 rounded-lg font-medium transition-all ${
+                  activeSort === 'recent'
+                    ? 'bg-brand-indigo-600 text-white shadow-sm'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                Chronological
+              </button>
+              <button
+                onClick={() => setActiveSort('endorsed')}
+                className={`px-3 py-1.5 rounded-lg font-medium transition-all ${
+                  activeSort === 'endorsed'
+                    ? 'bg-brand-indigo-600 text-white shadow-sm'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                Most Endorsed
+              </button>
+              <button
+                onClick={() => setActiveSort('following')}
+                className={`px-3 py-1.5 rounded-lg font-medium transition-all ${
+                  activeSort === 'following'
+                    ? 'bg-brand-indigo-600 text-white shadow-sm'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                Following Scholars
+              </button>
+            </div>
+
+            {/* Filter Search Input */}
+            <div className="relative min-w-[220px]">
+              <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+              <input
+                type="text"
+                placeholder="Search feed topics..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full h-8 pl-8 pr-3 rounded-lg bg-surface-card border border-surface-border text-xs text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-brand-indigo-500"
+              />
+            </div>
           </div>
 
-          <div className="relative">
-            <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
-            <input
-              type="text"
-              placeholder="Search concepts or tags..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full sm:w-56 h-8 pl-8 pr-3 rounded-xl bg-surface-base border border-surface-border text-xs text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-brand-indigo-500"
-            />
+          {/* Academic Categories Pills */}
+          <div className="flex items-center gap-2 overflow-x-auto no-scrollbar py-1">
+            {categories.map((c) => (
+              <button
+                key={c.id}
+                onClick={() => setActiveCategory(c.id)}
+                className={`px-3 py-1 rounded-full text-xs font-medium whitespace-nowrap transition-all ${
+                  activeCategory === c.id
+                    ? 'bg-white text-slate-900 font-semibold shadow-sm'
+                    : 'bg-surface-elevated/40 text-slate-400 hover:text-slate-200 hover:bg-surface-elevated border border-surface-border/50'
+                }`}
+              >
+                {c.label}
+              </button>
+            ))}
           </div>
         </div>
 
-        {/* Knowledge Posts Stream */}
+        {/* Feed Posts List */}
         <div className="space-y-4">
           {loading ? (
             <div className="py-16 flex flex-col items-center justify-center gap-3">
@@ -317,55 +625,61 @@ export default function ExploreFeedPage() {
                           size="md"
                         />
                         <div>
-                          <div className="flex items-center gap-2">
+                          <div className="flex items-center gap-1.5">
                             <span className="font-semibold text-white text-sm group-hover:text-brand-indigo-300 transition-colors">
                               {post.author.display_name}
                             </span>
-                            <Badge
-                              roleType={post.author.role}
-                              isVerified={post.author.verification_status === 'VERIFIED'}
-                              className="text-[9px] px-1.5 py-0"
-                            />
+                            {post.author.role && (
+                              <Badge roleType={post.author.role as any} isVerified={post.author.role !== 'STUDENT'} />
+                            )}
                           </div>
-                          <p className="text-[10px] text-slate-400">
-                            @{post.author.username} {post.author.headline ? `· ${post.author.headline}` : ''}
+                          <p className="text-[11px] text-slate-400">
+                            {post.author.headline || `@${post.author.username}`}
                           </p>
                         </div>
                       </Link>
                     ) : (
                       <div className="flex items-center gap-2">
-                        <Avatar name="Learner" size="md" />
+                        <Avatar name="Anonymous Scholar" size="sm" />
                         <span className="text-xs text-slate-400">Anonymous Scholar</span>
                       </div>
                     )}
 
-                    <div className="flex items-center gap-2 shrink-0">
-                      <span className="text-[10px] font-semibold uppercase px-2 py-0.5 rounded bg-surface-elevated text-brand-indigo-300 border border-surface-border">
-                        {post.type}
+                    {/* Post Type & Category Badges */}
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] font-mono uppercase px-2 py-0.5 rounded bg-surface-elevated text-slate-300 border border-surface-border flex items-center gap-1">
+                        {getPostTypeIcon(post.type)} {post.type}
                       </span>
                     </div>
                   </div>
+
+                  <Link href={`/posts/${post.slug}`} className="block group pt-2">
+                    <CardTitle className="text-lg font-bold text-white group-hover:text-brand-indigo-400 transition-colors leading-snug">
+                      {post.title}
+                    </CardTitle>
+                  </Link>
                 </CardHeader>
 
                 <CardContent className="space-y-3">
-                  <Link href={`/posts/${post.slug}`}>
-                    <h2 className="text-base sm:text-lg font-bold text-white leading-snug hover:text-brand-indigo-300 transition-colors cursor-pointer">
-                      {post.title}
-                    </h2>
-                  </Link>
+                  <p className="text-xs sm:text-sm text-slate-300 leading-relaxed line-clamp-3">
+                    {post.content}
+                  </p>
 
-                  {post.summary && (
-                    <p className="text-xs text-slate-300 leading-relaxed line-clamp-3">
-                      {post.summary}
-                    </p>
+                  {/* Code snippet rendering if post contains code block */}
+                  {post.content.includes('```') && (
+                    <CodeBlock
+                      code={post.content.split('```')[1]?.replace(/^[a-z]+\n/, '') || ''}
+                      language={post.content.split('```')[1]?.split('\n')[0] || 'typescript'}
+                    />
                   )}
 
+                  {/* Tags */}
                   {post.tags && post.tags.length > 0 && (
                     <div className="flex flex-wrap gap-1.5 pt-1">
                       {post.tags.map((tag) => (
                         <span
                           key={tag}
-                          className="text-[10px] font-mono px-2 py-0.5 rounded bg-surface-subtle text-slate-400 border border-surface-border"
+                          className="text-[10px] font-mono px-2 py-0.5 rounded bg-surface-subtle text-slate-400 border border-surface-border/50"
                         >
                           #{tag}
                         </span>
@@ -375,58 +689,82 @@ export default function ExploreFeedPage() {
                 </CardContent>
 
                 <CardFooter className="flex items-center justify-between text-xs text-slate-400 pt-3 border-t border-surface-border/50">
-                  <div className="flex items-center gap-4 flex-wrap">
-                    {/* Academic Accuracy Endorsement Button */}
+                  <div className="flex items-center gap-3">
+                    {/* Accuracy Endorsement Button */}
                     <button
                       onClick={() => handleToggleInteraction(post.id, 'ENDORSE_ACCURACY')}
-                      className={`flex items-center gap-1.5 transition-colors font-medium ${
+                      aria-label="Endorse accuracy of this post"
+                      className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg border transition-all ${
                         post.user_interactions?.has_endorsed
-                          ? 'text-emerald-400'
-                          : 'hover:text-emerald-400 text-slate-400'
+                          ? 'border-emerald-500/50 bg-emerald-950/40 text-emerald-300 font-semibold'
+                          : 'border-surface-border hover:border-emerald-500/30 text-slate-300 hover:text-emerald-300 hover:bg-surface-elevated'
                       }`}
-                      title="Academic accuracy endorsement (Educators & Researchers)"
                     >
-                      <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-                      <span>{post.upvote_count || 0} Endorsements</span>
+                      <CheckCircle2
+                        className={`w-3.5 h-3.5 ${
+                          post.user_interactions?.has_endorsed
+                            ? 'text-emerald-400 fill-emerald-400/20'
+                            : 'text-emerald-400'
+                        }`}
+                      />
+                      <span className="hidden sm:inline text-[11px]">
+                        {post.user_interactions?.has_endorsed ? 'Endorsed' : 'Endorse'}
+                      </span>
                     </button>
 
-                    {/* Insightful Vote Button */}
+                    {/* Insightful Upvote Button */}
                     <button
                       onClick={() => handleToggleInteraction(post.id, 'UPVOTE_INSIGHTFUL')}
-                      className={`flex items-center gap-1.5 transition-colors ${
+                      aria-label="Mark insight as valuable"
+                      className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg border transition-all ${
                         post.user_interactions?.has_upvoted
-                          ? 'text-brand-indigo-400 font-semibold'
-                          : 'hover:text-brand-indigo-400 text-slate-400'
+                          ? 'border-brand-indigo-500/50 bg-brand-indigo-950/40 text-brand-indigo-300 font-semibold'
+                          : 'border-surface-border hover:border-brand-indigo-500/30 text-slate-300 hover:text-brand-indigo-300 hover:bg-surface-elevated'
                       }`}
-                      title="Mark post as insightful"
                     >
-                      <Sparkles className="w-4 h-4 text-brand-indigo-400" />
-                      <span>Insightful</span>
+                      <Sparkles
+                        className={`w-3.5 h-3.5 ${
+                          post.user_interactions?.has_upvoted
+                            ? 'text-brand-indigo-400 fill-brand-indigo-400/20'
+                            : 'text-brand-indigo-400'
+                        }`}
+                      />
+                      <span className="font-mono text-xs">{post.upvote_count || 0}</span>
+                      <span className="hidden sm:inline text-[11px]">Insightful</span>
                     </button>
 
-                    {/* Discussion Link */}
+                    {/* Comments Count */}
                     <Link
-                      href={`/posts/${post.slug}`}
-                      className="flex items-center gap-1.5 hover:text-slate-200 transition-colors"
-                      title="Comments & Discussion"
+                      href={`/posts/${post.slug}#discussion`}
+                      className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg hover:bg-surface-elevated text-slate-400 hover:text-white transition-colors"
                     >
-                      <MessageSquare className="w-4 h-4" />
-                      <span>{post.comment_count || 0} Discussions</span>
+                      <MessageSquare className="w-3.5 h-3.5" />
+                      <span className="font-mono text-xs">{post.comment_count || 0}</span>
+                      <span className="hidden sm:inline text-[11px]">Discussions</span>
                     </Link>
                   </div>
 
-                  <div className="flex items-center gap-1">
+                  <div className="flex items-center gap-1.5">
+                    {/* Bookmark Action */}
                     <button
                       onClick={() => handleToggleBookmark(post.id)}
-                      className={`p-1.5 rounded-lg transition-colors ${
+                      aria-label="Save to bookmarks"
+                      className={`p-1.5 rounded-lg border transition-all ${
                         post.user_interactions?.has_bookmarked
-                          ? 'text-amber-400 bg-surface-elevated'
-                          : 'text-slate-400 hover:text-white hover:bg-surface-elevated'
+                          ? 'border-brand-cyan-500/50 bg-brand-cyan-950/40 text-brand-cyan-300'
+                          : 'border-surface-border hover:border-surface-border text-slate-400 hover:text-white hover:bg-surface-elevated'
                       }`}
-                      title="Bookmark post"
                     >
-                      <Bookmark className="w-4 h-4" />
+                      <Bookmark
+                        className={`w-4 h-4 ${
+                          post.user_interactions?.has_bookmarked
+                            ? 'fill-brand-cyan-400 text-brand-cyan-400'
+                            : ''
+                        }`}
+                      />
                     </button>
+
+                    {/* View Full Insight Link */}
                     <Link href={`/posts/${post.slug}`}>
                       <Button size="sm" variant="ghost" className="text-xs h-7 px-2">
                         Read &rarr;
@@ -438,15 +776,11 @@ export default function ExploreFeedPage() {
             ))
           ) : (
             <EmptyState
-              title="No posts found in this feed"
-              description="Be the first educator or researcher to publish a verified tutorial, article, or inquiry in this field."
-              actionLabel="Reset Search & Filters"
-              onAction={() => {
-                setActiveCategory('all');
-                setActiveType('ALL');
-                setActiveSort('recent');
-                setSearchQuery('');
-              }}
+              icon={Compass}
+              title="No knowledge posts found"
+              description="No publications match your selected discipline or filter criteria. Be the first scholar to publish an insight."
+              actionLabel="Publish First Insight"
+              onAction={() => setIsComposing(true)}
             />
           )}
         </div>
