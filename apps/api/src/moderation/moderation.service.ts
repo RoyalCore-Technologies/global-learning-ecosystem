@@ -144,6 +144,8 @@ export class ModerationService {
         await client.from('posts').update({ status: 'REMOVED' }).eq('id', report.target_id);
       } else if (report.target_type === 'COMMENT') {
         await client.from('comments').delete().eq('id', report.target_id);
+      } else if (report.target_type === 'COMMUNITY') {
+        await client.from('communities').delete().eq('id', report.target_id);
       }
     } else if (dto.action === 'BAN_USER') {
       if (report.target_type === 'USER') {

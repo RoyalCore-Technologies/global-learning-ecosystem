@@ -174,5 +174,71 @@ describe('ModerationService', () => {
         })
       );
     });
+
+    it('resolves report and removes violating community when target_type is COMMUNITY', async () => {
+      const existingReport = {
+        id: 'rep-comm-1',
+        target_type: 'COMMUNITY',
+        target_id: 'comm-abusive-id',
+        status: 'PENDING',
+      };
+
+      const updatedReport = {
+        ...existingReport,
+        status: 'RESOLVED',
+        resolved_by: 'admin-1',
+      };
+
+      const commDeleteMock = vi.fn().mockReturnValue({
+        eq: vi.fn().mockResolvedValue({ error: null }),
+      });
+      const auditInsertMock = vi.fn().mockResolvedValue({ error: null });
+
+      mockSupabaseClient.from.mockImplementation((table: string) => {
+        if (table === 'reports') {
+          return {
+            select: vi.fn().mockReturnValue({
+              eq: vi.fn().mockReturnValue({
+                single: vi.fn().mockResolvedValue({ data: existingReport, error: null }),
+              }),
+            }),
+            update: vi.fn().mockReturnValue({
+              eq: vi.fn().mockReturnValue({
+                select: vi.fn().mockReturnValue({
+                  single: vi.fn().mockResolvedValue({ data: updatedReport, error: null }),
+                }),
+              }),
+            }),
+          };
+        }
+        if (table === 'communities') {
+          return {
+            delete: commDeleteMock,
+          };
+        }
+        if (table === 'system_audit_logs') {
+          return {
+            insert: auditInsertMock,
+          };
+        }
+        return {};
+      });
+
+      const res = await service.resolveReport('rep-comm-1', 'admin-1', {
+        status: 'RESOLVED',
+        action: 'REMOVE_CONTENT',
+        resolution_notes: 'Community violates policy on academic integrity.',
+      });
+
+      expect(res.status).toBe('RESOLVED');
+      expect(commDeleteMock).toHaveBeenCalled();
+      expect(auditInsertMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: 'RESOLVE_MODERATION_REPORT',
+          entity_type: 'COMMUNITY',
+          performed_by: 'admin-1',
+        })
+      );
+    });
   });
 });
