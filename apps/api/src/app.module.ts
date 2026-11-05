@@ -15,6 +15,7 @@ import { CoursesModule } from './courses/courses.module.js';
 import { EnrollmentsModule } from './enrollments/enrollments.module.js';
 import { CommunitiesModule } from './communities/communities.module.js';
 import { ChannelsModule } from './channels/channels.module.js';
+import { AiModule } from './ai/ai.module.js';
 
 @Module({
   imports: [
@@ -41,6 +42,7 @@ import { ChannelsModule } from './channels/channels.module.js';
     EnrollmentsModule,
     CommunitiesModule,
     ChannelsModule,
+    AiModule,
   ],
   providers: [
     {
