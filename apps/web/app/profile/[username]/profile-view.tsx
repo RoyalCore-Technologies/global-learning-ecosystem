@@ -11,7 +11,7 @@ import { Tabs } from '@/components/ui/tabs';
 import { EmptyState, LoadingSpinner } from '@/components/ui/feedback';
 import { apiClient } from '@/lib/api-client';
 import { getSupabaseBrowserClient } from '@/lib/supabase/client';
-import type { Profile, Post } from '@platform/types';
+import type { Profile, Post, Course, CreatorChannel } from '@platform/types';
 import {
   UserPlus,
   UserCheck,
@@ -29,6 +29,8 @@ import {
   Users,
   MessageSquare,
   AlertCircle,
+  Radio,
+  Clock,
 } from 'lucide-react';
 
 interface ProfileViewProps {
@@ -40,12 +42,15 @@ export function ProfileView({ username }: ProfileViewProps) {
   const [posts, setPosts] = useState<Post[]>([]);
   const [followers, setFollowers] = useState<Profile[]>([]);
   const [following, setFollowing] = useState<Profile[]>([]);
+  const [courses, setCourses] = useState<Course[]>([]);
+  const [channels, setChannels] = useState<CreatorChannel[]>([]);
   const [loading, setLoading] = useState(true);
   const [postsLoading, setPostsLoading] = useState(false);
   const [networkLoading, setNetworkLoading] = useState(false);
+  const [creatorContentLoading, setCreatorContentLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<'posts' | 'about' | 'followers' | 'following'>('posts');
+  const [activeTab, setActiveTab] = useState<'posts' | 'courses' | 'about' | 'followers' | 'following'>('posts');
   const [isFollowLoading, setIsFollowLoading] = useState(false);
   const [copiedShare, setCopiedShare] = useState(false);
 
@@ -120,6 +125,34 @@ export function ProfileView({ username }: ProfileViewProps) {
         })
         .catch(() => setFollowing([]))
         .finally(() => setNetworkLoading(false));
+    } else if (activeTab === 'courses') {
+      setCreatorContentLoading(true);
+      Promise.all([
+        apiClient<Course[]>(`courses?instructor_id=${profile.id}&limit=20`),
+        apiClient<{ data: CreatorChannel[] }>(`channels?owner_id=${profile.id}&limit=10`),
+      ])
+        .then(([coursesRes, channelsRes]) => {
+          if (coursesRes.data && Array.isArray(coursesRes.data)) {
+            setCourses(coursesRes.data);
+          } else if (coursesRes.data && Array.isArray((coursesRes.data as any).data)) {
+            setCourses((coursesRes.data as any).data);
+          } else {
+            setCourses([]);
+          }
+
+          if (channelsRes.data && Array.isArray((channelsRes.data as any).data)) {
+            setChannels((channelsRes.data as any).data);
+          } else if (channelsRes.data && Array.isArray(channelsRes.data)) {
+            setChannels(channelsRes.data as any);
+          } else {
+            setChannels([]);
+          }
+        })
+        .catch(() => {
+          setCourses([]);
+          setChannels([]);
+        })
+        .finally(() => setCreatorContentLoading(false));
     }
   }, [profile?.id, activeTab]);
 
@@ -377,6 +410,7 @@ export function ProfileView({ username }: ProfileViewProps) {
           <Tabs
             tabs={[
               { id: 'posts', label: 'Published Insights', count: profile.posts_count },
+              { id: 'courses', label: 'Courses & Channels' },
               { id: 'about', label: 'Academic Credentials' },
               { id: 'followers', label: 'Followers', count: profile.follower_count },
               { id: 'following', label: 'Following', count: profile.following_count },
@@ -445,7 +479,110 @@ export function ProfileView({ username }: ProfileViewProps) {
             </div>
           )}
 
-          {/* TAB 2: About & Academic Credentials */}
+          {/* TAB 2: Courses & Channels */}
+          {activeTab === 'courses' && (
+            <div className="space-y-6">
+              {creatorContentLoading ? (
+                <div className="py-12 flex justify-center">
+                  <LoadingSpinner size="md" />
+                </div>
+              ) : (
+                <>
+                  {/* Channels Section */}
+                  {channels.length > 0 && (
+                    <div className="space-y-3">
+                      <h3 className="text-sm font-semibold uppercase tracking-wider text-slate-400 flex items-center gap-2">
+                        <Radio className="w-4 h-4 text-emerald-400" />
+                        Broadcast Channels ({channels.length})
+                      </h3>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        {channels.map((ch) => (
+                          <Card key={ch.id} variant="default" className="p-4 flex flex-col justify-between">
+                            <div className="space-y-2">
+                              <div className="flex items-center justify-between">
+                                <h4 className="font-bold text-white text-base hover:text-brand-indigo-300 transition-colors">
+                                  {ch.name}
+                                </h4>
+                                <Badge variant="secondary" className="text-[10px]">
+                                  {ch.subscriber_count} subscribers
+                                </Badge>
+                              </div>
+                              {ch.description && (
+                                <p className="text-xs text-slate-300 line-clamp-2 leading-relaxed">
+                                  {ch.description}
+                                </p>
+                              )}
+                            </div>
+                            <div className="mt-4 pt-3 border-t border-surface-border/50 flex items-center justify-between">
+                              <span className="text-[11px] font-mono text-slate-400">/{ch.slug}</span>
+                              <Link href={`/creator?channel=${ch.slug}`}>
+                                <Button size="sm" variant="ghost" className="text-xs">
+                                  Open Studio &rarr;
+                                </Button>
+                              </Link>
+                            </div>
+                          </Card>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Courses Section */}
+                  <div className="space-y-3">
+                    <h3 className="text-sm font-semibold uppercase tracking-wider text-slate-400 flex items-center gap-2">
+                      <BookOpen className="w-4 h-4 text-brand-indigo-400" />
+                      Authored Curricula ({courses.length})
+                    </h3>
+                    {courses.length > 0 ? (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        {courses.map((course) => (
+                          <Card key={course.id} variant="default" className="p-4 flex flex-col justify-between hover:border-surface-border transition-all">
+                            <div className="space-y-2">
+                              <div className="flex items-center justify-between">
+                                <Badge variant="secondary" className="text-[10px]">
+                                  {course.level}
+                                </Badge>
+                                <span className="text-[11px] font-mono text-emerald-400">
+                                  {course.tier === 'FREE' ? 'FREE' : `$${((course.price_cents || 0) / 100).toFixed(2)}`}
+                                </span>
+                              </div>
+                              <Link href={`/courses/${course.id}`}>
+                                <h4 className="font-bold text-white text-base hover:text-brand-indigo-300 transition-colors cursor-pointer">
+                                  {course.title}
+                                </h4>
+                              </Link>
+                              {course.summary && (
+                                <p className="text-xs text-slate-300 line-clamp-2 leading-relaxed">
+                                  {course.summary}
+                                </p>
+                              )}
+                            </div>
+                            <div className="mt-4 pt-3 border-t border-surface-border/50 flex items-center justify-between text-xs text-slate-400">
+                              <div className="flex items-center gap-3">
+                                <span>{course.enrolled_count ?? 0} enrolled</span>
+                              </div>
+                              <Link href={`/courses/${course.id}`}>
+                                <Button size="sm" variant="ghost" className="text-xs">
+                                  View Syllabus &rarr;
+                                </Button>
+                              </Link>
+                            </div>
+                          </Card>
+                        ))}
+                      </div>
+                    ) : channels.length === 0 ? (
+                      <EmptyState
+                        title="No courses or channels yet"
+                        description="This scholar has not yet published any learning curricula or broadcast channels."
+                      />
+                    ) : null}
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+
+          {/* TAB 3: About & Academic Credentials */}
           {activeTab === 'about' && (
             <Card variant="default" className="space-y-6 p-6">
               <div>

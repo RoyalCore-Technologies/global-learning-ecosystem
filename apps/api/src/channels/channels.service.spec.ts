@@ -41,6 +41,24 @@ describe('ChannelsService', () => {
       expect(result.data[0].subscriber_count).toBe(5000);
     });
 
+    it('filters channel catalog by owner_id when provided', async () => {
+      const mockChannels = [
+        { id: 'ch-1', name: 'AI Research Lab', owner_id: 'scholar-1', subscriber_count: 5000 },
+      ];
+
+      const chain: any = {};
+      chain.select = vi.fn().mockReturnValue(chain);
+      chain.eq = vi.fn().mockReturnValue(chain);
+      chain.order = vi.fn().mockReturnValue(chain);
+      chain.range = vi.fn().mockResolvedValue({ data: mockChannels, error: null, count: 1 });
+
+      mockSupabaseClient.from.mockReturnValue(chain);
+
+      const result = await service.getChannels(undefined, 1, 20, 'scholar-1');
+      expect(chain.eq).toHaveBeenCalledWith('owner_id', 'scholar-1');
+      expect(result.data).toHaveLength(1);
+    });
+
     it('returns single channel with subscription status for authenticated user', async () => {
       const mockChannel = {
         id: 'ch-1',

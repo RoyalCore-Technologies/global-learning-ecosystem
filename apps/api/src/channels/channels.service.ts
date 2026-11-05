@@ -33,7 +33,8 @@ export class ChannelsService {
   async getChannels(
     search?: string,
     page = 1,
-    limit = 20
+    limit = 20,
+    ownerId?: string
   ): Promise<{ data: CreatorChannel[]; total: number; page: number; limit: number }> {
     const client = this.databaseService.getClient();
     const safeLimit = Math.min(limit || 20, 50);
@@ -45,6 +46,10 @@ export class ChannelsService {
       .select('*, owner:owner_id(id, username, display_name, avatar_url, role, verification_status)', {
         count: 'exact',
       });
+
+    if (ownerId) {
+      q = q.eq('owner_id', ownerId);
+    }
 
     if (search) {
       const searchTerms = search.trim().replace(/[^\w\s]/g, '');

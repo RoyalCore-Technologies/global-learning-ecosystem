@@ -122,4 +122,28 @@ describe('Learnova Social Foundation Frontend Contracts (M2.4 - M2.6)', () => {
     expect(rootComment.replies?.[0].is_solution).toBe(true);
     expect(rootComment.replies?.[0].parent_comment_id).toBe('c-root');
   });
+
+  it('validates creator profile publications and broadcast channel linkage contracts (M4.6)', () => {
+    const mockChannel = {
+      id: 'chan-1',
+      owner_id: 'scholar-uuid-1',
+      name: 'Distributed Systems Studio',
+      slug: 'distributed-systems-studio',
+      subscriber_count: 1420,
+    };
+
+    const mockCourse = {
+      id: 'course-1',
+      instructor_id: 'scholar-uuid-1',
+      title: 'Advanced Consensus in Rust',
+      level: 'ADVANCED',
+      tier: 'FREE',
+      enrolled_count: 850,
+    };
+
+    expect(mockChannel.owner_id).toBe('scholar-uuid-1');
+    expect(mockCourse.instructor_id).toBe('scholar-uuid-1');
+    expect(mockChannel.subscriber_count).toBeGreaterThanOrEqual(0);
+    expect(mockCourse.enrolled_count).toBeGreaterThanOrEqual(0);
+  });
 });

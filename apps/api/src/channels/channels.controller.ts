@@ -30,10 +30,11 @@ export class ChannelsController {
   @ApiResponse({ status: 200, description: 'Channels list retrieved successfully' })
   async getChannels(
     @Query('search') search?: string,
+    @Query('owner_id') ownerId?: string,
     @Query('page') page?: number,
     @Query('limit') limit?: number
   ) {
-    const result = await this.channelsService.getChannels(search, page, limit);
+    const result = await this.channelsService.getChannels(search, page, limit, ownerId);
     return {
       success: true,
       ...result,
