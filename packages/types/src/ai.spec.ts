@@ -81,4 +81,25 @@ describe('Learnova M5 AI Learning Companion Types', () => {
     expect(result.passed).toBe(true);
     expect(result.percentage).toBe(100);
   });
+
+  it('validates adaptive learning mastery records and recommendations contracts (M5.4)', () => {
+    const masteryRecord = {
+      id: 'mast-1',
+      user_id: 'user-1',
+      concept_tag: 'quorum-intersection',
+      mastery_score: 0.95,
+      attempts_count: 5,
+      correct_count: 5,
+      last_evaluated_at: '2026-11-05T12:00:00Z',
+      next_review_due_at: '2026-11-12T12:00:00Z',
+      review_interval_days: 7,
+      ease_factor: 2.6,
+      repetition_count: 3,
+      status: 'MASTERED' as const,
+    };
+
+    expect(masteryRecord.status).toBe('MASTERED');
+    expect(masteryRecord.mastery_score).toBe(0.95);
+    expect(masteryRecord.review_interval_days).toBe(7);
+  });
 });

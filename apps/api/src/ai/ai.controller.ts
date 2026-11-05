@@ -1,6 +1,7 @@
 import {
   Controller,
   Post,
+  Get,
   Body,
   Param,
   UseGuards,
@@ -85,6 +86,19 @@ export class AiController {
     return {
       success: true,
       data: result,
+    };
+  }
+
+  @Get('adaptive/recommendations')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Retrieve adaptive learning recommendations and concept mastery records' })
+  @ApiResponse({ status: 200, description: 'Adaptive recommendations returned' })
+  async getAdaptiveRecommendations(@CurrentUser() user: AuthenticatedUser) {
+    const recommendations = await this.aiService.getAdaptiveRecommendations(user.id);
+    return {
+      success: true,
+      data: recommendations,
     };
   }
 }

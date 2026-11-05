@@ -115,6 +115,28 @@ describe('Learnova Database Migrations & Safety Suite', () => {
     expect(sql006).toContain('idx_community_members_role');
   });
 
+  it('verifies migration 007 implements AI learning foundation tables and RLS', () => {
+    const migration007Path = path.join(migrationsDir, '007_ai_learning_foundation.sql');
+    expect(fs.existsSync(migration007Path)).toBe(true);
+
+    const sql007 = fs.readFileSync(migration007Path, 'utf8');
+    expect(sql007).toContain('ai_learning_sessions');
+    expect(sql007).toContain('ai_learning_messages');
+    expect(sql007).toContain('ai_assessments');
+    expect(sql007).toContain('ai_sessions_select');
+  });
+
+  it('verifies migration 008 implements adaptive learning concept mastery tracking and RLS', () => {
+    const migration008Path = path.join(migrationsDir, '008_adaptive_learning.sql');
+    expect(fs.existsSync(migration008Path)).toBe(true);
+
+    const sql008 = fs.readFileSync(migration008Path, 'utf8');
+    expect(sql008).toContain('learner_concept_mastery');
+    expect(sql008).toContain('mastery_score');
+    expect(sql008).toContain('review_interval_days');
+    expect(sql008).toContain('learner_mastery_select');
+  });
+
   it('guarantees zero payment card columns or sensitive secrets in monetization tables', () => {
     const sql002 = fs.readFileSync(migration002Path, 'utf8');
 

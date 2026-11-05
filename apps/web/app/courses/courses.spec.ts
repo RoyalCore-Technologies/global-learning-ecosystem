@@ -478,4 +478,137 @@ describe('Learnova Course Catalog & Syllabus UI Integration (M3.4)', () => {
       expect(sanitized).not.toContain('!');
     });
   });
+
+  describe('Contextual AI Learning Companion & Adaptive Mastery (M5.4)', () => {
+    it('constructs contextual AI query payload with course and active lesson metadata', async () => {
+      let capturedUrl = '';
+      let capturedBody: any = null;
+
+      globalThis.fetch = vi.fn().mockImplementation((url: string, opts: any) => {
+        capturedUrl = url;
+        capturedBody = JSON.parse(opts.body);
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: async () => ({
+            success: true,
+            session_id: 'sess-100',
+            response: {
+              text: 'Leader completeness guarantees log consistency.',
+              citations: ['Ongaro & Ousterhout (2014)'],
+              follow_up_questions: ['What is the invariant proof?'],
+              provider: 'learnova-academic-engine',
+              model: 'local-academic-grounding',
+            },
+          }),
+        });
+      });
+
+      const res = await apiClient<{ response: any; session_id: string }>('ai/query', {
+        method: 'POST',
+        body: JSON.stringify({
+          query: 'Explain the safety invariant',
+          mode: 'PROOF',
+          context: {
+            course_id: 'c-1',
+            lesson_id: 'les-1',
+            learner_level: 'INTERMEDIATE',
+            current_lesson_title: 'Raft Consensus Protocol',
+          },
+        }),
+      });
+
+      expect(res.success).toBe(true);
+      expect(capturedUrl).toContain('/api/v1/ai/query');
+      expect(capturedBody.context.course_id).toBe('c-1');
+      expect(capturedBody.context.lesson_id).toBe('les-1');
+      expect(capturedBody.context.current_lesson_title).toBe('Raft Consensus Protocol');
+      expect(res.data?.response.provider).toBe('learnova-academic-engine');
+    });
+
+    it('submits lesson assessment answers and verifies SM-2 mastery feedback', async () => {
+      let submittedBody: any = null;
+
+      globalThis.fetch = vi.fn().mockImplementation((_url: string, opts: any) => {
+        submittedBody = JSON.parse(opts.body);
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: async () => ({
+            success: true,
+            data: {
+              assessment_id: 'assess-101',
+              score: 2,
+              total_questions: 2,
+              percentage: 100,
+              passed: true,
+              detailed_feedback: [
+                {
+                  question_id: 'q1',
+                  is_correct: true,
+                  explanation: 'Correct quorum intersection.',
+                  concept_tag: 'quorum',
+                },
+              ],
+            },
+          }),
+        });
+      });
+
+      const res = await apiClient('ai/assessments/submit', {
+        method: 'POST',
+        body: JSON.stringify({
+          assessment_id: 'assess-101',
+          answers: [{ question_id: 'q1', selected_option_index: 0 }],
+        }),
+      });
+
+      expect(res.success).toBe(true);
+      expect(submittedBody.assessment_id).toBe('assess-101');
+      expect(submittedBody.answers).toHaveLength(1);
+    });
+
+    it('fetches adaptive recommendations and verifies SM-2 spaced repetition metrics', async () => {
+      globalThis.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          success: true,
+          data: {
+            learner_id: 'user-1',
+            overall_mastery_percentage: 85,
+            total_concepts_tracked: 4,
+            knowledge_gaps: [],
+            due_reviews: [
+              {
+                id: 'cm-1',
+                concept_tag: 'Two-Phase Commit',
+                mastery_score: 0.8,
+                review_interval_days: 6,
+                next_review_due_at: new Date().toISOString(),
+                status: 'REVIEWING',
+              },
+            ],
+            mastered_concepts: [],
+            recommended_actions: [
+              {
+                type: 'PRACTICE_ASSESSMENT',
+                concept_tag: 'Two-Phase Commit',
+                title: 'Spaced Repetition Review: Two-Phase Commit',
+                reason: 'Memory decay interval reached.',
+                priority: 'MEDIUM',
+              },
+            ],
+          },
+        }),
+      });
+
+      const res = await apiClient<any>('ai/adaptive/recommendations');
+
+      expect(res.success).toBe(true);
+      expect(res.data?.overall_mastery_percentage).toBe(85);
+      expect(res.data?.due_reviews[0].review_interval_days).toBe(6);
+      expect(res.data?.recommended_actions[0].type).toBe('PRACTICE_ASSESSMENT');
+    });
+  });
 });

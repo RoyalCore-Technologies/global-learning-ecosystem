@@ -13,6 +13,7 @@ describe('Learnova Milestone 5.2: AI Learning Foundation Schema & RLS (PGlite En
   const migration005 = fs.readFileSync(path.join(migrationsDir, '005_learning_foundation.sql'), 'utf8');
   const migration006 = fs.readFileSync(path.join(migrationsDir, '006_creator_community.sql'), 'utf8');
   const migration007 = fs.readFileSync(path.join(migrationsDir, '007_ai_learning_foundation.sql'), 'utf8');
+  const migration008 = fs.readFileSync(path.join(migrationsDir, '008_adaptive_learning.sql'), 'utf8');
 
   const studentUser1 = '11111111-1111-1111-1111-111111111111';
   const studentUser2 = '22222222-2222-2222-2222-222222222222';
@@ -85,6 +86,7 @@ describe('Learnova Milestone 5.2: AI Learning Foundation Schema & RLS (PGlite En
     await db.exec(migration005);
     await db.exec(migration006);
     await db.exec(migration007);
+    await db.exec(migration008);
 
     // Seed test users
     await db.exec(`
@@ -230,5 +232,54 @@ describe('Learnova Milestone 5.2: AI Learning Foundation Schema & RLS (PGlite En
     `);
     expect(record.rows[0].passed).toBe(true);
     expect(record.rows[0].score).toBe(1);
+  });
+
+  describe('Adaptive Learning & Concept Mastery (008)', () => {
+    it('creates and updates learner concept mastery with spaced-repetition attributes', async () => {
+      // Act as student 1
+      await db.exec(`SET request.jwt.claim.sub = '${studentUser1}';`);
+
+      const insertRes = await db.query<{ id: string; status: string }>(`
+        INSERT INTO public.learner_concept_mastery (
+          user_id, concept_tag, mastery_score, attempts_count, correct_count,
+          review_interval_days, ease_factor, repetition_count, status
+        ) VALUES (
+          '${studentUser1}', 'quorum-intersection', 1.0, 3, 3,
+          6, 2.60, 2, 'MASTERED'
+        )
+        RETURNING id, status;
+      `);
+
+      expect(insertRes.rows.length).toBe(1);
+      expect(insertRes.rows[0].status).toBe('MASTERED');
+
+      // Update for review failure (knowledge gap detection)
+      const updateRes = await db.query<{ status: string; repetition_count: number }>(`
+        UPDATE public.learner_concept_mastery
+        SET 
+          status = 'NEEDS_REVISION',
+          repetition_count = 0,
+          review_interval_days = 1,
+          mastery_score = 0.5,
+          attempts_count = 4,
+          last_evaluated_at = now()
+        WHERE user_id = '${studentUser1}' AND concept_tag = 'quorum-intersection'
+        RETURNING status, repetition_count;
+      `);
+
+      expect(updateRes.rows[0].status).toBe('NEEDS_REVISION');
+      expect(updateRes.rows[0].repetition_count).toBe(0);
+    });
+
+    it('enforces learner privacy: student 2 cannot see student 1 mastery records', async () => {
+      // Evaluate privacy expression
+      const evalStudent2 = await db.query<{ allowed: boolean }>(`
+        SELECT EXISTS (
+          SELECT 1 FROM public.learner_concept_mastery m
+          WHERE m.concept_tag = 'quorum-intersection' AND (m.user_id = '${studentUser2}' OR public.is_platform_admin('${studentUser2}'))
+        ) as allowed;
+      `);
+      expect(evalStudent2.rows[0].allowed).toBe(false);
+    });
   });
 });

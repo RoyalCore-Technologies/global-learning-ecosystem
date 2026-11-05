@@ -14,7 +14,18 @@ import { Accordion, AccordionItem } from '@/components/ui/accordion';
 import { Skeleton, ErrorState, EmptyState } from '@/components/ui/feedback';
 import { apiClient, ApiError } from '@/lib/api-client';
 import { getSupabaseBrowserClient } from '@/lib/supabase/client';
-import type { Course, CourseModule, Lesson, CourseEnrollment } from '@platform/types';
+import type {
+  Course,
+  CourseModule,
+  Lesson,
+  CourseEnrollment,
+  AiScaffoldingMode,
+  AiChatMessage,
+  AiQueryResponseDto,
+  AssessmentCheckResponseDto,
+  SubmitAssessmentResultDto,
+  AdaptiveRecommendationsDto,
+} from '@platform/types';
 import {
   Play,
   Pause,
@@ -39,6 +50,14 @@ import {
   Check,
   FileDown,
   ExternalLink,
+  Brain,
+  RefreshCw,
+  Target,
+  Lightbulb,
+  ArrowRight,
+  Send,
+  GraduationCap,
+  HelpCircle,
 } from 'lucide-react';
 
 export default function CourseLectureInterfacePage({
@@ -62,7 +81,7 @@ export default function CourseLectureInterfacePage({
 
   // Player & Lesson Navigation State
   const [activeLessonId, setActiveLessonId] = useState<string>('');
-  const [activeTab, setActiveTab] = useState<'notes' | 'lab' | 'transcript' | 'resources' | 'qa'>('notes');
+  const [activeTab, setActiveTab] = useState<'notes' | 'lab' | 'companion' | 'transcript' | 'resources' | 'qa'>('notes');
   const [isPlaying, setIsPlaying] = useState(false);
   const [playbackSpeed, setPlaybackSpeed] = useState('1x');
   const [currentProgressSec, setCurrentProgressSec] = useState(0);
@@ -72,6 +91,27 @@ export default function CourseLectureInterfacePage({
   const [userCode, setUserCode] = useState<string>('');
   const [copiedCode, setCopiedCode] = useState(false);
   const videoRef = React.useRef<HTMLVideoElement>(null);
+
+  // Companion & Adaptive Learning State
+  const [companionMode, setCompanionMode] = useState<AiScaffoldingMode>('EXPLANATION');
+  const [companionLevel, setCompanionLevel] = useState<'BEGINNER' | 'INTERMEDIATE' | 'ADVANCED'>('INTERMEDIATE');
+  const [companionSessionId, setCompanionSessionId] = useState<string | null>(null);
+  const [companionMessages, setCompanionMessages] = useState<AiChatMessage[]>([]);
+  const [companionInput, setCompanionInput] = useState('');
+  const [isGeneratingCompanion, setIsGeneratingCompanion] = useState(false);
+  const [companionError, setCompanionError] = useState<string | null>(null);
+
+  // Lesson Knowledge Check & Assessment State
+  const [companionAssessment, setCompanionAssessment] = useState<AssessmentCheckResponseDto | null>(null);
+  const [isGeneratingAssessment, setIsGeneratingAssessment] = useState(false);
+  const [companionAnswers, setCompanionAnswers] = useState<Record<string, number>>({});
+  const [isSubmittingAssessment, setIsSubmittingAssessment] = useState(false);
+  const [assessmentResult, setAssessmentResult] = useState<SubmitAssessmentResultDto | null>(null);
+
+  // Adaptive Retention & Spaced-Repetition State
+  const [adaptiveData, setAdaptiveData] = useState<AdaptiveRecommendationsDto | null>(null);
+  const [isLoadingAdaptive, setIsLoadingAdaptive] = useState(false);
+  const [showAdaptiveDrawer, setShowAdaptiveDrawer] = useState(false);
 
   // Fetch course details from GET /api/v1/courses/:slugOrId
   const fetchCourseData = useCallback(async () => {
@@ -251,6 +291,178 @@ export default function CourseLectureInterfacePage({
       videoRef.current.pause();
     }
   }, [activeLesson?.id, activeLesson?.code_lab?.starter_code]);
+
+  // Synchronize companion greeting and session per active lesson
+  useEffect(() => {
+    if (!activeLesson) return;
+    setCompanionSessionId(null);
+    setCompanionAssessment(null);
+    setAssessmentResult(null);
+    setCompanionAnswers({});
+    setCompanionError(null);
+    setCompanionMessages([
+      {
+        id: `init-${activeLesson.id}`,
+        sender: 'ai',
+        text: `Hello! I am your AI Learning Companion for "${activeLesson.title}".\n\nI can assist you with step-by-step conceptual proofs, Socratic dialogue, assignment code reviews, or generate a quick knowledge-check quiz based on this lesson's invariants.`,
+        citations: [
+          'Learnova Curriculum Peer-Verified Standard',
+          'Academic Literature Grounding Engine',
+        ],
+        follow_up_questions: [
+          `Can you explain the key intuition behind ${activeLesson.title}?`,
+          `Walk me through an invariant proof for this lesson.`,
+          `What are common failure modes or edge-cases in this topic?`,
+        ],
+        timestamp: 'Just now',
+      },
+    ]);
+  }, [activeLesson?.id, activeLesson?.title]);
+
+  const fetchAdaptiveRecommendations = useCallback(async () => {
+    setIsLoadingAdaptive(true);
+    try {
+      const res = await apiClient<AdaptiveRecommendationsDto>('ai/adaptive/recommendations');
+      if (res.success && res.data) {
+        setAdaptiveData(res.data);
+      }
+    } catch (err) {
+      console.warn('Failed to load adaptive recommendations:', err);
+    } finally {
+      setIsLoadingAdaptive(false);
+    }
+  }, []);
+
+  const handleSendCompanionQuery = async (overrideText?: string) => {
+    const text = (overrideText || companionInput).trim();
+    if (!text || isGeneratingCompanion) return;
+
+    setCompanionError(null);
+    const userMsg: AiChatMessage = {
+      id: `u-${Date.now()}`,
+      sender: 'user',
+      text,
+      timestamp: 'Just now',
+    };
+
+    setCompanionMessages((prev) => [...prev, userMsg]);
+    if (!overrideText) setCompanionInput('');
+    setIsGeneratingCompanion(true);
+
+    try {
+      const endpoint = companionSessionId
+        ? `ai/sessions/${companionSessionId}/query`
+        : 'ai/query';
+
+      const payload = {
+        query: text,
+        mode: companionMode,
+        context: {
+          course_id: course?.id,
+          lesson_id: activeLesson?.id,
+          learner_level: companionLevel,
+          current_lesson_title: activeLesson?.title,
+          student_code: userCode || undefined,
+        },
+      };
+
+      const res = await apiClient<{ response: AiQueryResponseDto; session_id: string }>(
+        endpoint,
+        {
+          method: 'POST',
+          body: JSON.stringify(payload),
+        }
+      );
+
+      if (res.success && res.data) {
+        const { response: aiRes, session_id } = res.data;
+        if (session_id) setCompanionSessionId(session_id);
+
+        const aiMsg: AiChatMessage = {
+          id: `ai-${Date.now()}`,
+          sender: 'ai',
+          text: aiRes.text,
+          codeSnippet: aiRes.codeSnippet,
+          citations: aiRes.citations,
+          follow_up_questions: aiRes.follow_up_questions,
+          provider: aiRes.provider,
+          model: aiRes.model,
+          timestamp: 'Just now',
+        };
+
+        setCompanionMessages((prev) => [...prev, aiMsg]);
+      } else {
+        setCompanionError('Failed to generate response. Please try again.');
+      }
+    } catch (err: any) {
+      setCompanionError(err.message || 'Error communicating with AI Companion service.');
+    } finally {
+      setIsGeneratingCompanion(false);
+    }
+  };
+
+  const handleGenerateLessonAssessment = async () => {
+    if (!activeLesson || isGeneratingAssessment) return;
+    setIsGeneratingAssessment(true);
+    setCompanionAssessment(null);
+    setAssessmentResult(null);
+    setCompanionAnswers({});
+    setCompanionError(null);
+
+    try {
+      const res = await apiClient<AssessmentCheckResponseDto>('ai/assessments/generate', {
+        method: 'POST',
+        body: JSON.stringify({
+          topic: activeLesson.title,
+          level: companionLevel,
+          context: {
+            course_id: course?.id,
+            lesson_id: activeLesson.id,
+            learner_level: companionLevel,
+          },
+        }),
+      });
+
+      if (res.success && res.data) {
+        setCompanionAssessment(res.data);
+      } else {
+        setCompanionError('Could not generate assessment quiz for this lesson.');
+      }
+    } catch (err: any) {
+      setCompanionError(err.message || 'Failed to generate assessment.');
+    } finally {
+      setIsGeneratingAssessment(false);
+    }
+  };
+
+  const handleSubmitLessonAssessment = async () => {
+    if (!companionAssessment || isSubmittingAssessment) return;
+    setIsSubmittingAssessment(true);
+
+    try {
+      const answersPayload = Object.entries(companionAnswers).map(([qId, optIdx]) => ({
+        question_id: qId,
+        selected_option_index: optIdx,
+      }));
+
+      const res = await apiClient<SubmitAssessmentResultDto>('ai/assessments/submit', {
+        method: 'POST',
+        body: JSON.stringify({
+          assessment_id: companionAssessment.assessment_id,
+          answers: answersPayload,
+        }),
+      });
+
+      if (res.success && res.data) {
+        setAssessmentResult(res.data);
+        fetchAdaptiveRecommendations();
+      }
+    } catch (err: any) {
+      setCompanionError(err.message || 'Failed to grade assessment.');
+    } finally {
+      setIsSubmittingAssessment(false);
+    }
+  };
 
   const handleTogglePlay = () => {
     if (!videoRef.current) {
@@ -677,6 +889,7 @@ export default function CourseLectureInterfacePage({
                 {[
                   { id: 'notes' as const, label: 'Concept Notes & Proofs', icon: BookOpen },
                   { id: 'lab' as const, label: 'Interactive Code Lab', icon: Code2 },
+                  { id: 'companion' as const, label: 'AI Companion & Socratic Tutor', icon: Sparkles },
                   { id: 'transcript' as const, label: 'Lecture Transcript', icon: FileText },
                   { id: 'resources' as const, label: 'Resources & Downloads', icon: FileDown },
                   { id: 'qa' as const, label: 'Peer Q&A & Endorsements', icon: MessageSquare },
@@ -814,6 +1027,476 @@ export default function CourseLectureInterfacePage({
                       No interactive code lab specified for this lecture.
                     </Card>
                   )}
+                </div>
+              )}
+
+              {/* Tab: AI Companion & Socratic Tutor */}
+              {activeTab === 'companion' && (
+                <div className="space-y-4">
+                  {/* Companion Header Controls */}
+                  <Card variant="elevated" className="p-4 space-y-3">
+                    <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 pb-3 border-b border-surface-border/60">
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-2">
+                          <h2 className="text-sm font-bold text-white flex items-center gap-2">
+                            <Sparkles className="w-4 h-4 text-brand-indigo-400" /> Lesson AI Companion
+                          </h2>
+                          <Badge variant="secondary" className="text-[10px] font-mono">
+                            {companionSessionId ? 'Continuous Session Active' : 'New Session'}
+                          </Badge>
+                        </div>
+                        <p className="text-xs text-slate-400">
+                          Real-time cognitive scaffolding grounded in peer-reviewed literature and course invariants.
+                        </p>
+                      </div>
+
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          onClick={() => {
+                            setShowAdaptiveDrawer(!showAdaptiveDrawer);
+                            if (!adaptiveData) fetchAdaptiveRecommendations();
+                          }}
+                          className="text-xs flex items-center gap-1.5"
+                        >
+                          <Target className="w-3.5 h-3.5 text-brand-cyan-400" />
+                          <span>{showAdaptiveDrawer ? 'Hide Mastery & SM-2' : 'View Mastery & SM-2'}</span>
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="primary"
+                          onClick={handleGenerateLessonAssessment}
+                          isLoading={isGeneratingAssessment}
+                          className="text-xs flex items-center gap-1.5"
+                        >
+                          <Brain className="w-3.5 h-3.5" />
+                          <span>Lesson Knowledge Check</span>
+                        </Button>
+                      </div>
+                    </div>
+
+                    {/* Controls row: Mode & Level */}
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-1">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-[11px] font-mono text-slate-400">Mode:</span>
+                        {[
+                          { id: 'EXPLANATION' as const, label: 'Concept Breakdown' },
+                          { id: 'SOCRATIC' as const, label: 'Socratic Dialogue' },
+                          { id: 'PROOF' as const, label: 'Formal Proof' },
+                          { id: 'CODE_ANALYSIS' as const, label: 'Code Review' },
+                        ].map((m) => (
+                          <button
+                            key={m.id}
+                            onClick={() => setCompanionMode(m.id)}
+                            className={`px-2.5 py-1 rounded text-[11px] font-medium transition-colors ${
+                              companionMode === m.id
+                                ? 'bg-brand-indigo-600 text-white shadow-sm'
+                                : 'bg-surface-subtle text-slate-400 hover:text-slate-200 hover:bg-surface-elevated'
+                            }`}
+                          >
+                            {m.label}
+                          </button>
+                        ))}
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <span className="text-[11px] font-mono text-slate-400">Level:</span>
+                        {(['BEGINNER', 'INTERMEDIATE', 'ADVANCED'] as const).map((lvl) => (
+                          <button
+                            key={lvl}
+                            onClick={() => setCompanionLevel(lvl)}
+                            className={`px-2 py-0.5 rounded text-[10px] font-mono uppercase transition-colors ${
+                              companionLevel === lvl
+                                ? 'bg-slate-200 text-slate-900 font-bold'
+                                : 'text-slate-400 hover:text-slate-200'
+                            }`}
+                          >
+                            {lvl}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </Card>
+
+                  {/* Adaptive Mastery & SM-2 Retention Drawer */}
+                  {showAdaptiveDrawer && (
+                    <Card variant="elevated" className="p-5 space-y-4 border-brand-indigo-500/40 bg-brand-indigo-950/10">
+                      <div className="flex items-center justify-between pb-2 border-b border-surface-border/60">
+                        <div className="flex items-center gap-2">
+                          <Target className="w-4 h-4 text-brand-indigo-400" />
+                          <h3 className="text-sm font-bold text-white">
+                            Adaptive Mastery &amp; SM-2 Spaced Repetition
+                          </h3>
+                        </div>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={fetchAdaptiveRecommendations}
+                          isLoading={isLoadingAdaptive}
+                          className="h-7 text-xs text-slate-400 hover:text-white"
+                        >
+                          <RefreshCw className="w-3.5 h-3.5" />
+                        </Button>
+                      </div>
+
+                      {isLoadingAdaptive && !adaptiveData ? (
+                        <div className="p-6 text-center text-xs text-slate-400">Loading mastery evidence...</div>
+                      ) : adaptiveData ? (
+                        <div className="space-y-4">
+                          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                            <div className="p-3 rounded-lg bg-surface-subtle border border-surface-border">
+                              <span className="text-[10px] font-mono text-slate-400">OVERALL RETENTION</span>
+                              <div className="text-xl font-bold text-white mt-1">
+                                {adaptiveData.overall_mastery_percentage}%
+                              </div>
+                            </div>
+                            <div className="p-3 rounded-lg bg-surface-subtle border border-surface-border">
+                              <span className="text-[10px] font-mono text-slate-400">CONCEPTS TRACKED</span>
+                              <div className="text-xl font-bold text-brand-cyan-400 mt-1">
+                                {adaptiveData.total_concepts_tracked}
+                              </div>
+                            </div>
+                            <div className="p-3 rounded-lg bg-surface-subtle border border-surface-border">
+                              <span className="text-[10px] font-mono text-slate-400">REVIEWS DUE (SM-2)</span>
+                              <div className="text-xl font-bold text-amber-400 mt-1">
+                                {adaptiveData.due_reviews.length}
+                              </div>
+                            </div>
+                            <div className="p-3 rounded-lg bg-surface-subtle border border-surface-border">
+                              <span className="text-[10px] font-mono text-slate-400">KNOWLEDGE GAPS</span>
+                              <div className="text-xl font-bold text-rose-400 mt-1">
+                                {adaptiveData.knowledge_gaps.length}
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Recommended Actions */}
+                          {adaptiveData.recommended_actions.length > 0 && (
+                            <div className="space-y-2">
+                              <h4 className="text-xs font-semibold text-slate-300">Recommended Next Steps:</h4>
+                              <div className="space-y-2">
+                                {adaptiveData.recommended_actions.map((act, idx) => (
+                                  <div
+                                    key={idx}
+                                    className="p-3 rounded-lg bg-surface-subtle border border-surface-border/60 flex items-start justify-between gap-3 text-xs"
+                                  >
+                                    <div className="space-y-1">
+                                      <div className="flex items-center gap-2">
+                                        <Badge
+                                          variant={act.priority === 'HIGH' ? 'warning' : 'secondary'}
+                                          className="text-[9px]"
+                                        >
+                                          {act.priority} PRIORITY
+                                        </Badge>
+                                        <span className="font-semibold text-white">{act.title}</span>
+                                      </div>
+                                      <p className="text-slate-400">{act.reason}</p>
+                                    </div>
+                                    {act.concept_tag && (
+                                      <Button
+                                        size="sm"
+                                        variant="secondary"
+                                        className="text-[11px] h-7 shrink-0"
+                                        onClick={() => {
+                                          handleSendCompanionQuery(
+                                            `Explain the core invariant and common mistakes for concept: ${act.concept_tag}`
+                                          );
+                                          setShowAdaptiveDrawer(false);
+                                        }}
+                                      >
+                                        Study Now
+                                      </Button>
+                                    )}
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        <p className="text-xs text-slate-400 text-center py-4">
+                          Complete a lesson knowledge check to build your personalized mastery schedule.
+                        </p>
+                      )}
+                    </Card>
+                  )}
+
+                  {/* Lesson Knowledge Check Modal/Inline View */}
+                  {companionAssessment && (
+                    <Card variant="elevated" className="p-5 space-y-4 border-brand-cyan-500/40 bg-surface-elevated/90">
+                      <div className="flex items-center justify-between pb-3 border-b border-surface-border/60">
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <Brain className="w-4 h-4 text-brand-cyan-400" />
+                            <h3 className="text-sm font-bold text-white">
+                              Lesson Assessment: {companionAssessment.topic}
+                            </h3>
+                          </div>
+                          <p className="text-xs text-slate-400 mt-0.5">
+                            Adaptive quiz questions with SM-2 spaced repetition tracking.
+                          </p>
+                        </div>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => setCompanionAssessment(null)}
+                          className="h-7 text-xs text-slate-400"
+                        >
+                          Close Quiz
+                        </Button>
+                      </div>
+
+                      {/* Assessment Result Banner */}
+                      {assessmentResult ? (
+                        <div className="space-y-4">
+                          <div
+                            className={`p-4 rounded-xl border ${
+                              assessmentResult.passed
+                                ? 'bg-emerald-950/20 border-emerald-500/40 text-emerald-300'
+                                : 'bg-rose-950/20 border-rose-500/40 text-rose-300'
+                            } flex items-center justify-between`}
+                          >
+                            <div className="space-y-1">
+                              <h4 className="text-sm font-bold">
+                                {assessmentResult.passed ? 'Assessment Passed!' : 'Needs Revision'}
+                              </h4>
+                              <p className="text-xs opacity-90">
+                                Score: {assessmentResult.score} / {assessmentResult.total_questions} (
+                                {assessmentResult.percentage}%) — Concept mastery updated in database.
+                              </p>
+                            </div>
+                            <Button
+                              size="sm"
+                              variant="secondary"
+                              onClick={handleGenerateLessonAssessment}
+                              isLoading={isGeneratingAssessment}
+                            >
+                              Retake Quiz
+                            </Button>
+                          </div>
+
+                          <div className="space-y-3">
+                            {assessmentResult.detailed_feedback.map((fb, idx) => (
+                              <div
+                                key={idx}
+                                className={`p-3 rounded-lg border text-xs space-y-1.5 ${
+                                  fb.is_correct
+                                    ? 'border-emerald-500/30 bg-emerald-950/10'
+                                    : 'border-rose-500/30 bg-rose-950/10'
+                                }`}
+                              >
+                                <div className="flex items-center justify-between font-semibold">
+                                  <span className="text-white">Question {idx + 1}</span>
+                                  <Badge
+                                    variant={fb.is_correct ? 'success' : 'secondary'}
+                                    className="text-[9px]"
+                                  >
+                                    {fb.is_correct ? 'Correct' : 'Incorrect'}
+                                  </Badge>
+                                </div>
+                                <p className="text-slate-300">{fb.explanation}</p>
+                                <div className="text-[10px] font-mono text-slate-400">
+                                  Concept Invariant: {fb.concept_tag}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      ) : (
+                        /* Question options */
+                        <div className="space-y-5">
+                          {companionAssessment.questions.map((q, qIdx) => (
+                            <div key={q.id} className="space-y-2 p-3.5 rounded-xl bg-surface-subtle border border-surface-border">
+                              <div className="flex items-start justify-between gap-2">
+                                <h4 className="text-xs font-semibold text-white">
+                                  {qIdx + 1}. {q.prompt}
+                                </h4>
+                                <Badge variant="secondary" className="text-[9px] font-mono">
+                                  {q.concept_tag}
+                                </Badge>
+                              </div>
+
+                              <div className="space-y-1.5 pt-1">
+                                {q.options.map((opt, optIdx) => (
+                                  <label
+                                    key={optIdx}
+                                    className={`flex items-center gap-2.5 p-2.5 rounded-lg text-xs cursor-pointer border transition-colors ${
+                                      companionAnswers[q.id] === optIdx
+                                        ? 'bg-brand-indigo-950/40 border-brand-indigo-500/70 text-white'
+                                        : 'bg-surface-elevated/40 border-surface-border/40 text-slate-300 hover:bg-surface-elevated'
+                                    }`}
+                                  >
+                                    <input
+                                      type="radio"
+                                      name={q.id}
+                                      checked={companionAnswers[q.id] === optIdx}
+                                      onChange={() =>
+                                        setCompanionAnswers((prev) => ({
+                                          ...prev,
+                                          [q.id]: optIdx,
+                                        }))
+                                      }
+                                      className="text-brand-indigo-600 focus:ring-brand-indigo-500"
+                                    />
+                                    <span>{opt}</span>
+                                  </label>
+                                ))}
+                              </div>
+                            </div>
+                          ))}
+
+                          <Button
+                            size="sm"
+                            variant="primary"
+                            onClick={handleSubmitLessonAssessment}
+                            isLoading={isSubmittingAssessment}
+                            disabled={
+                              Object.keys(companionAnswers).length !== companionAssessment.questions.length
+                            }
+                            className="w-full text-xs"
+                          >
+                            Submit Answers for Grading &amp; Mastery Tracking
+                          </Button>
+                        </div>
+                      )}
+                    </Card>
+                  )}
+
+                  {/* Chat Conversation Thread */}
+                  <Card variant="elevated" className="p-4 space-y-4">
+                    <div className="space-y-4 max-h-[500px] overflow-y-auto pr-1">
+                      {companionMessages.map((msg) => (
+                        <div
+                          key={msg.id}
+                          className={`flex gap-3 ${
+                            msg.sender === 'user' ? 'justify-end' : 'justify-start'
+                          }`}
+                        >
+                          {msg.sender === 'ai' && (
+                            <div className="w-8 h-8 rounded-full bg-brand-indigo-600/20 border border-brand-indigo-500/30 flex items-center justify-center shrink-0 mt-0.5">
+                              <Sparkles className="w-4 h-4 text-brand-indigo-400" />
+                            </div>
+                          )}
+
+                          <div
+                            className={`max-w-[85%] rounded-2xl p-4 text-xs space-y-2.5 leading-relaxed ${
+                              msg.sender === 'user'
+                                ? 'bg-brand-indigo-600 text-white'
+                                : 'bg-surface-subtle border border-surface-border text-slate-200'
+                            }`}
+                          >
+                            {msg.sender === 'ai' && (
+                              <div className="flex flex-wrap items-center justify-between gap-2 pb-1.5 border-b border-surface-border/60 text-[10px]">
+                                <span className="font-semibold text-brand-indigo-300">
+                                  Learnova Academic AI Companion
+                                </span>
+                                <div className="flex items-center gap-1.5">
+                                  {msg.provider && (
+                                    <span className="font-mono text-slate-400">
+                                      {msg.provider}
+                                    </span>
+                                  )}
+                                  <span className="px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/20 font-sans">
+                                    AI-Generated Explanation — Not Verified Course Note
+                                  </span>
+                                </div>
+                              </div>
+                            )}
+
+                            <p className="whitespace-pre-line">{msg.text}</p>
+
+                            {msg.codeSnippet && (
+                              <div className="pt-1">
+                                <CodeBlock
+                                  code={msg.codeSnippet.code}
+                                  language={msg.codeSnippet.language}
+                                  filename={msg.codeSnippet.filename || 'invariant-sample.ts'}
+                                />
+                              </div>
+                            )}
+
+                            {msg.citations && msg.citations.length > 0 && (
+                              <div className="pt-2 border-t border-surface-border/40 space-y-1">
+                                <span className="text-[10px] font-mono text-slate-400 uppercase flex items-center gap-1">
+                                  <BookOpen className="w-3 h-3 text-slate-400" /> Literature References:
+                                </span>
+                                <ul className="list-disc list-inside text-[10px] text-slate-400 space-y-0.5">
+                                  {msg.citations.map((c, i) => (
+                                    <li key={i}>{c}</li>
+                                  ))}
+                                </ul>
+                              </div>
+                            )}
+
+                            {msg.follow_up_questions && msg.follow_up_questions.length > 0 && (
+                              <div className="pt-2 border-t border-surface-border/40 space-y-1.5">
+                                <span className="text-[10px] font-mono text-brand-indigo-300">
+                                  Deepen Concept (Quick Prompts):
+                                </span>
+                                <div className="flex flex-wrap gap-1.5">
+                                  {msg.follow_up_questions.map((q, idx) => (
+                                    <button
+                                      key={idx}
+                                      onClick={() => handleSendCompanionQuery(q)}
+                                      className="text-left text-[11px] px-2.5 py-1 rounded bg-surface-elevated hover:bg-brand-indigo-600/20 border border-surface-border hover:border-brand-indigo-500/50 text-slate-300 hover:text-white transition-colors"
+                                    >
+                                      {q}
+                                    </button>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+
+                      {isGeneratingCompanion && (
+                        <div className="flex gap-3 items-center text-xs text-slate-400 pl-2">
+                          <Sparkles className="w-4 h-4 text-brand-indigo-400 animate-spin" />
+                          <span>Synthesizing peer-reviewed conceptual explanation...</span>
+                        </div>
+                      )}
+                    </div>
+
+                    {companionError && (
+                      <div className="p-3 rounded-lg bg-rose-950/30 border border-rose-500/40 text-xs text-rose-300 flex items-center gap-2">
+                        <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
+                        <span>{companionError}</span>
+                      </div>
+                    )}
+
+                    {/* Chat Input */}
+                    <div className="pt-2 border-t border-surface-border/60 space-y-2">
+                      <div className="text-[10px] text-slate-400 flex items-center justify-between">
+                        <span>
+                          Active Context: <strong>{activeLesson?.title || 'Lesson Invariants'}</strong> ({companionLevel})
+                        </span>
+                        <span className="font-mono">Server-Side Sandboxed Inference</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="text"
+                          value={companionInput}
+                          onChange={(e) => setCompanionInput(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') handleSendCompanionQuery();
+                          }}
+                          placeholder={`Ask a question about ${activeLesson?.title || 'this lesson'}...`}
+                          className="flex-1 bg-surface-subtle border border-surface-border rounded-lg px-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-brand-indigo-500"
+                        />
+                        <Button
+                          size="sm"
+                          variant="primary"
+                          onClick={() => handleSendCompanionQuery()}
+                          isLoading={isGeneratingCompanion}
+                          disabled={!companionInput.trim()}
+                        >
+                          <Send className="w-3.5 h-3.5" />
+                        </Button>
+                      </div>
+                    </div>
+                  </Card>
                 </div>
               )}
 
