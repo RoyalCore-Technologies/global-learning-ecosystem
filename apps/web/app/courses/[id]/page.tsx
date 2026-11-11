@@ -12,19 +12,26 @@ import { ProgressBar } from '@/components/ui/progress';
 import { CodeBlock } from '@/components/ui/code-block';
 import { Accordion, AccordionItem } from '@/components/ui/accordion';
 import { Skeleton, ErrorState, EmptyState } from '@/components/ui/feedback';
-import { apiClient, ApiError } from '@/lib/api-client';
+import { apiClient, streamAiClient, ApiError } from '@/lib/api-client';
 import { getSupabaseBrowserClient } from '@/lib/supabase/client';
+import {
+  AI_SUPPORTED_LANGUAGES,
+  AI_AGE_GROUPS,
+  getAiLocaleConfig,
+} from '@/lib/i18n/ai-locales';
 import type {
   Course,
   CourseModule,
   Lesson,
   CourseEnrollment,
   AiScaffoldingMode,
+  LearningAgeGroup,
   AiChatMessage,
-  AiQueryResponseDto,
   AssessmentCheckResponseDto,
   SubmitAssessmentResultDto,
   AdaptiveRecommendationsDto,
+  AiLearningSessionSummary,
+  AiLearningSessionDetail,
 } from '@platform/types';
 import {
   Play,
@@ -58,6 +65,9 @@ import {
   Send,
   GraduationCap,
   HelpCircle,
+  Globe,
+  Shield,
+  Square,
 } from 'lucide-react';
 
 export default function CourseLectureInterfacePage({
@@ -95,11 +105,15 @@ export default function CourseLectureInterfacePage({
   // Companion & Adaptive Learning State
   const [companionMode, setCompanionMode] = useState<AiScaffoldingMode>('EXPLANATION');
   const [companionLevel, setCompanionLevel] = useState<'BEGINNER' | 'INTERMEDIATE' | 'ADVANCED'>('INTERMEDIATE');
+  const [companionLanguage, setCompanionLanguage] = useState<string>('en');
+  const [companionAgeGroup, setCompanionAgeGroup] = useState<LearningAgeGroup>('ADULT');
   const [companionSessionId, setCompanionSessionId] = useState<string | null>(null);
   const [companionMessages, setCompanionMessages] = useState<AiChatMessage[]>([]);
   const [companionInput, setCompanionInput] = useState('');
   const [isGeneratingCompanion, setIsGeneratingCompanion] = useState(false);
   const [companionError, setCompanionError] = useState<string | null>(null);
+  const companionAbortRef = React.useRef<AbortController | null>(null);
+  const { option: companionLocaleOption, strings: companionLocaleStrings } = getAiLocaleConfig(companionLanguage);
 
   // Lesson Knowledge Check & Assessment State
   const [companionAssessment, setCompanionAssessment] = useState<AssessmentCheckResponseDto | null>(null);
@@ -292,32 +306,64 @@ export default function CourseLectureInterfacePage({
     }
   }, [activeLesson?.id, activeLesson?.code_lab?.starter_code]);
 
-  // Synchronize companion greeting and session per active lesson
+  // Synchronize companion greeting & load persisted session per active lesson
   useEffect(() => {
     if (!activeLesson) return;
+    let cancelled = false;
+
+    const initMsg: AiChatMessage = {
+      id: `init-${activeLesson.id}`,
+      sender: 'ai',
+      text: `Hello! I am your AI Learning Companion for "${activeLesson.title}".\n\nI can assist you with step-by-step conceptual proofs, Socratic dialogue, assignment code reviews, or generate a quick knowledge-check quiz based on this lesson's invariants.`,
+      citations: [
+        'Learnova Curriculum Peer-Verified Standard',
+        'Academic Literature Grounding Engine',
+      ],
+      follow_up_questions: [
+        `Can you explain the key intuition behind ${activeLesson.title}?`,
+        `Walk me through an invariant proof for this lesson.`,
+        `What are common failure modes or edge-cases in this topic?`,
+      ],
+      provider: 'learnova-academic-core',
+      is_fallback: false,
+      timestamp: 'Ready',
+    };
+
     setCompanionSessionId(null);
     setCompanionAssessment(null);
     setAssessmentResult(null);
     setCompanionAnswers({});
     setCompanionError(null);
-    setCompanionMessages([
-      {
-        id: `init-${activeLesson.id}`,
-        sender: 'ai',
-        text: `Hello! I am your AI Learning Companion for "${activeLesson.title}".\n\nI can assist you with step-by-step conceptual proofs, Socratic dialogue, assignment code reviews, or generate a quick knowledge-check quiz based on this lesson's invariants.`,
-        citations: [
-          'Learnova Curriculum Peer-Verified Standard',
-          'Academic Literature Grounding Engine',
-        ],
-        follow_up_questions: [
-          `Can you explain the key intuition behind ${activeLesson.title}?`,
-          `Walk me through an invariant proof for this lesson.`,
-          `What are common failure modes or edge-cases in this topic?`,
-        ],
-        timestamp: 'Just now',
-      },
-    ]);
-  }, [activeLesson?.id, activeLesson?.title]);
+    setCompanionMessages([initMsg]);
+
+    if (course?.id) {
+      getSupabaseBrowserClient()
+        .auth.getSession()
+        .then(async ({ data: { session } }) => {
+          if (!session?.user || cancelled) return;
+          try {
+            const sessRes = await apiClient<AiLearningSessionSummary[]>(
+              `ai/sessions?courseId=${encodeURIComponent(course.id)}&lessonId=${encodeURIComponent(activeLesson.id)}`
+            );
+            if (!cancelled && sessRes.success && Array.isArray(sessRes.data) && sessRes.data.length > 0) {
+              const latest = sessRes.data[0];
+              const detailRes = await apiClient<AiLearningSessionDetail>(`ai/sessions/${latest.id}`);
+              if (!cancelled && detailRes.success && detailRes.data && detailRes.data.messages.length > 0) {
+                setCompanionSessionId(detailRes.data.id);
+                setCompanionMessages(detailRes.data.messages);
+              }
+            }
+          } catch {
+            // Non-blocking: start fresh session if unavailable
+          }
+        })
+        .catch(() => {});
+    }
+
+    return () => {
+      cancelled = true;
+    };
+  }, [course?.id, activeLesson?.id, activeLesson?.title]);
 
   const fetchAdaptiveRecommendations = useCallback(async () => {
     setIsLoadingAdaptive(true);
@@ -333,6 +379,12 @@ export default function CourseLectureInterfacePage({
     }
   }, []);
 
+  const handleStopCompanionStream = () => {
+    companionAbortRef.current?.abort();
+    companionAbortRef.current = null;
+    setIsGeneratingCompanion(false);
+  };
+
   const handleSendCompanionQuery = async (overrideText?: string) => {
     const text = (overrideText || companionInput).trim();
     if (!text || isGeneratingCompanion) return;
@@ -342,61 +394,109 @@ export default function CourseLectureInterfacePage({
       id: `u-${Date.now()}`,
       sender: 'user',
       text,
+      language: companionLanguage,
       timestamp: 'Just now',
     };
 
-    setCompanionMessages((prev) => [...prev, userMsg]);
+    const streamMsgId = `ai-stream-${Date.now()}`;
+    const placeholderMsg: AiChatMessage = {
+      id: streamMsgId,
+      sender: 'ai',
+      text: '',
+      language: companionLanguage,
+      timestamp: 'Streaming...',
+    };
+
+    setCompanionMessages((prev) => [...prev, userMsg, placeholderMsg]);
     if (!overrideText) setCompanionInput('');
     setIsGeneratingCompanion(true);
 
+    const controller = new AbortController();
+    companionAbortRef.current = controller;
+
     try {
       const endpoint = companionSessionId
-        ? `ai/sessions/${companionSessionId}/query`
-        : 'ai/query';
+        ? `ai/sessions/${companionSessionId}/stream`
+        : 'ai/query/stream';
 
       const payload = {
         query: text,
         mode: companionMode,
         context: {
           course_id: course?.id,
+          course_title: course?.title,
           lesson_id: activeLesson?.id,
+          lesson_title: activeLesson?.title,
           learner_level: companionLevel,
-          current_lesson_title: activeLesson?.title,
-          student_code: userCode || undefined,
+          preferred_language: companionLanguage,
+          age_group: companionAgeGroup,
+          code_context: userCode
+            ? {
+                language: activeLesson?.code_lab?.language || 'typescript',
+                student_code: userCode,
+              }
+            : undefined,
         },
+        conversation_history: companionMessages
+          .filter((m) => !m.id.startsWith('init-') && (m.sender === 'user' || m.sender === 'ai'))
+          .slice(-6)
+          .map((m) => ({ sender: m.sender as 'user' | 'ai', text: m.text })),
       };
 
-      const res = await apiClient<{ response: AiQueryResponseDto; session_id: string }>(
+      await streamAiClient(
         endpoint,
-        {
-          method: 'POST',
-          body: JSON.stringify(payload),
-        }
+        payload,
+        (chunk) => {
+          if (chunk.event === 'session' && chunk.session_id) {
+            setCompanionSessionId(chunk.session_id);
+          } else if (chunk.event === 'delta' && chunk.delta) {
+            setCompanionMessages((prev) =>
+              prev.map((m) => (m.id === streamMsgId ? { ...m, text: m.text + chunk.delta } : m))
+            );
+          } else if (chunk.event === 'complete' && chunk.response) {
+            const aiRes = chunk.response;
+            setCompanionMessages((prev) =>
+              prev.map((m) =>
+                m.id === streamMsgId
+                  ? {
+                      ...m,
+                      id: aiRes.message_id || streamMsgId,
+                      text: aiRes.text,
+                      codeSnippet: aiRes.codeSnippet,
+                      citations: aiRes.citations,
+                      follow_up_questions: aiRes.follow_up_questions,
+                      provider: aiRes.provider,
+                      model: aiRes.model,
+                      is_fallback: aiRes.is_fallback,
+                      fallback_reason: aiRes.fallback_reason,
+                      language: aiRes.language || companionLanguage,
+                      safety_status: aiRes.safety_status,
+                      timestamp: 'Just now',
+                    }
+                  : m
+              )
+            );
+          } else if (chunk.event === 'error') {
+            throw new ApiError(500, 'STREAM_ERROR', chunk.error || 'AI companion error.');
+          }
+        },
+        controller.signal
       );
-
-      if (res.success && res.data) {
-        const { response: aiRes, session_id } = res.data;
-        if (session_id) setCompanionSessionId(session_id);
-
-        const aiMsg: AiChatMessage = {
-          id: `ai-${Date.now()}`,
-          sender: 'ai',
-          text: aiRes.text,
-          codeSnippet: aiRes.codeSnippet,
-          citations: aiRes.citations,
-          follow_up_questions: aiRes.follow_up_questions,
-          provider: aiRes.provider,
-          model: aiRes.model,
-          timestamp: 'Just now',
-        };
-
-        setCompanionMessages((prev) => [...prev, aiMsg]);
-      } else {
-        setCompanionError('Failed to generate response. Please try again.');
-      }
     } catch (err: any) {
-      setCompanionError(err.message || 'Error communicating with AI Companion service.');
+      if (err?.name === 'AbortError') {
+        setCompanionMessages((prev) =>
+          prev.map((m) =>
+            m.id === streamMsgId
+              ? { ...m, text: m.text || 'Generation stopped by learner.', timestamp: 'Stopped' }
+              : m
+          )
+        );
+      } else {
+        setCompanionMessages((prev) => prev.filter((m) => m.id !== streamMsgId));
+        setCompanionError(err.message || 'Error communicating with AI Companion service.');
+      }
     } finally {
+      companionAbortRef.current = null;
       setIsGeneratingCompanion(false);
     }
   };
@@ -417,8 +517,12 @@ export default function CourseLectureInterfacePage({
           level: companionLevel,
           context: {
             course_id: course?.id,
+            course_title: course?.title,
             lesson_id: activeLesson.id,
+            lesson_title: activeLesson.title,
             learner_level: companionLevel,
+            preferred_language: companionLanguage,
+            age_group: companionAgeGroup,
           },
         }),
       });
@@ -1032,21 +1136,21 @@ export default function CourseLectureInterfacePage({
 
               {/* Tab: AI Companion & Socratic Tutor */}
               {activeTab === 'companion' && (
-                <div className="space-y-4">
+                <div dir={companionLocaleOption.dir} className="space-y-4">
                   {/* Companion Header Controls */}
                   <Card variant="elevated" className="p-4 space-y-3">
                     <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 pb-3 border-b border-surface-border/60">
                       <div className="space-y-1">
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2 flex-wrap">
                           <h2 className="text-sm font-bold text-white flex items-center gap-2">
-                            <Sparkles className="w-4 h-4 text-brand-indigo-400" /> Lesson AI Companion
+                            <Sparkles className="w-4 h-4 text-brand-indigo-400" /> {companionLocaleStrings.companionTitle}
                           </h2>
                           <Badge variant="secondary" className="text-[10px] font-mono">
                             {companionSessionId ? 'Continuous Session Active' : 'New Session'}
                           </Badge>
                         </div>
                         <p className="text-xs text-slate-400">
-                          Real-time cognitive scaffolding grounded in peer-reviewed literature and course invariants.
+                          Server-side streaming AI grounded in peer-reviewed literature, lesson context, and safety guardrails.
                         </p>
                       </div>
 
@@ -1061,7 +1165,7 @@ export default function CourseLectureInterfacePage({
                           className="text-xs flex items-center gap-1.5"
                         >
                           <Target className="w-3.5 h-3.5 text-brand-cyan-400" />
-                          <span>{showAdaptiveDrawer ? 'Hide Mastery & SM-2' : 'View Mastery & SM-2'}</span>
+                          <span>{showAdaptiveDrawer ? 'Hide Mastery & SM-2' : companionLocaleStrings.adaptiveLabel}</span>
                         </Button>
                         <Button
                           size="sm"
@@ -1071,50 +1175,88 @@ export default function CourseLectureInterfacePage({
                           className="text-xs flex items-center gap-1.5"
                         >
                           <Brain className="w-3.5 h-3.5" />
-                          <span>Lesson Knowledge Check</span>
+                          <span>{companionLocaleStrings.knowledgeCheckLabel}</span>
                         </Button>
                       </div>
                     </div>
 
-                    {/* Controls row: Mode & Level */}
-                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-1">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="text-[11px] font-mono text-slate-400">Mode:</span>
-                        {[
-                          { id: 'EXPLANATION' as const, label: 'Concept Breakdown' },
-                          { id: 'SOCRATIC' as const, label: 'Socratic Dialogue' },
-                          { id: 'PROOF' as const, label: 'Formal Proof' },
-                          { id: 'CODE_ANALYSIS' as const, label: 'Code Review' },
-                        ].map((m) => (
-                          <button
-                            key={m.id}
-                            onClick={() => setCompanionMode(m.id)}
-                            className={`px-2.5 py-1 rounded text-[11px] font-medium transition-colors ${
-                              companionMode === m.id
-                                ? 'bg-brand-indigo-600 text-white shadow-sm'
-                                : 'bg-surface-subtle text-slate-400 hover:text-slate-200 hover:bg-surface-elevated'
-                            }`}
-                          >
-                            {m.label}
-                          </button>
-                        ))}
+                    {/* Controls row: Mode, Level, Language & Age Safety Calibration */}
+                    <div className="flex flex-col gap-2.5 pt-1">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-[11px] font-mono text-slate-400">Mode:</span>
+                          {[
+                            { id: 'EXPLANATION' as const, label: 'Concept Breakdown' },
+                            { id: 'SOCRATIC' as const, label: 'Socratic Dialogue' },
+                            { id: 'PROOF' as const, label: 'Formal Proof' },
+                            { id: 'CODE_ANALYSIS' as const, label: 'Code Review' },
+                          ].map((m) => (
+                            <button
+                              key={m.id}
+                              onClick={() => setCompanionMode(m.id)}
+                              className={`px-2.5 py-1 rounded text-[11px] font-medium transition-colors ${
+                                companionMode === m.id
+                                  ? 'bg-brand-indigo-600 text-white shadow-sm'
+                                  : 'bg-surface-subtle text-slate-400 hover:text-slate-200 hover:bg-surface-elevated'
+                              }`}
+                            >
+                              {m.label}
+                            </button>
+                          ))}
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                          <span className="text-[11px] font-mono text-slate-400">Level:</span>
+                          {(['BEGINNER', 'INTERMEDIATE', 'ADVANCED'] as const).map((lvl) => (
+                            <button
+                              key={lvl}
+                              onClick={() => setCompanionLevel(lvl)}
+                              className={`px-2 py-0.5 rounded text-[10px] font-mono uppercase transition-colors ${
+                                companionLevel === lvl
+                                  ? 'bg-slate-200 text-slate-900 font-bold'
+                                  : 'text-slate-400 hover:text-slate-200'
+                              }`}
+                            >
+                              {lvl}
+                            </button>
+                          ))}
+                        </div>
                       </div>
 
-                      <div className="flex items-center gap-2">
-                        <span className="text-[11px] font-mono text-slate-400">Level:</span>
-                        {(['BEGINNER', 'INTERMEDIATE', 'ADVANCED'] as const).map((lvl) => (
-                          <button
-                            key={lvl}
-                            onClick={() => setCompanionLevel(lvl)}
-                            className={`px-2 py-0.5 rounded text-[10px] font-mono uppercase transition-colors ${
-                              companionLevel === lvl
-                                ? 'bg-slate-200 text-slate-900 font-bold'
-                                : 'text-slate-400 hover:text-slate-200'
-                            }`}
+                      <div className="flex flex-wrap items-center justify-between gap-3 pt-1 border-t border-surface-border/40 text-[11px]">
+                        <div className="flex items-center gap-2">
+                          <Globe className="w-3.5 h-3.5 text-brand-cyan-400" />
+                          <span className="font-mono text-slate-400">Language:</span>
+                          <select
+                            aria-label="Companion response language"
+                            value={companionLanguage}
+                            onChange={(e) => setCompanionLanguage(e.target.value)}
+                            className="bg-surface-subtle border border-surface-border rounded px-2 py-0.5 text-[11px] text-slate-200 focus:outline-none"
                           >
-                            {lvl}
-                          </button>
-                        ))}
+                            {AI_SUPPORTED_LANGUAGES.map((l) => (
+                              <option key={l.code} value={l.code}>
+                                {l.nativeLabel}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                          <Shield className="w-3.5 h-3.5 text-emerald-400" />
+                          <span className="font-mono text-slate-400">Age Calibration:</span>
+                          <select
+                            aria-label="Learner age group"
+                            value={companionAgeGroup}
+                            onChange={(e) => setCompanionAgeGroup(e.target.value as LearningAgeGroup)}
+                            className="bg-surface-subtle border border-surface-border rounded px-2 py-0.5 text-[11px] text-slate-200 focus:outline-none"
+                          >
+                            {AI_AGE_GROUPS.map((g) => (
+                              <option key={g.id} value={g.id}>
+                                {g.label}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
                       </div>
                     </div>
                   </Card>
@@ -1391,20 +1533,33 @@ export default function CourseLectureInterfacePage({
                                 <span className="font-semibold text-brand-indigo-300">
                                   Learnova Academic AI Companion
                                 </span>
-                                <div className="flex items-center gap-1.5">
-                                  {msg.provider && (
-                                    <span className="font-mono text-slate-400">
-                                      {msg.provider}
+                                <div className="flex flex-wrap items-center gap-1.5">
+                                  {msg.safety_status && msg.safety_status !== 'SAFE' && (
+                                    <span className="px-1.5 py-0.5 rounded bg-rose-500/10 text-rose-300 border border-rose-500/30 font-sans">
+                                      Guardrail: {msg.safety_status}
                                     </span>
                                   )}
+                                  <span
+                                    className={`px-1.5 py-0.5 rounded font-mono ${
+                                      msg.is_fallback
+                                        ? 'bg-amber-500/10 text-amber-300 border border-amber-500/30'
+                                        : 'bg-brand-indigo-500/15 text-brand-indigo-300 border border-brand-indigo-500/30'
+                                    }`}
+                                  >
+                                    {msg.is_fallback
+                                      ? companionLocaleStrings.fallbackBadge
+                                      : msg.provider || companionLocaleStrings.liveBadge}
+                                  </span>
                                   <span className="px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/20 font-sans">
-                                    AI-Generated Explanation — Not Verified Course Note
+                                    {companionLocaleStrings.aiNoticeBadge}
                                   </span>
                                 </div>
                               </div>
                             )}
 
-                            <p className="whitespace-pre-line">{msg.text}</p>
+                            <p className="whitespace-pre-line">
+                              {msg.text || (isGeneratingCompanion && msg.sender === 'ai' ? 'Streaming response...' : '')}
+                            </p>
 
                             {msg.codeSnippet && (
                               <div className="pt-1">
@@ -1454,7 +1609,7 @@ export default function CourseLectureInterfacePage({
                       {isGeneratingCompanion && (
                         <div className="flex gap-3 items-center text-xs text-slate-400 pl-2">
                           <Sparkles className="w-4 h-4 text-brand-indigo-400 animate-spin" />
-                          <span>Synthesizing peer-reviewed conceptual explanation...</span>
+                          <span>Streaming peer-reviewed conceptual guidance...</span>
                         </div>
                       )}
                     </div>
@@ -1470,9 +1625,9 @@ export default function CourseLectureInterfacePage({
                     <div className="pt-2 border-t border-surface-border/60 space-y-2">
                       <div className="text-[10px] text-slate-400 flex items-center justify-between">
                         <span>
-                          Active Context: <strong>{activeLesson?.title || 'Lesson Invariants'}</strong> ({companionLevel})
+                          Active Context: <strong>{activeLesson?.title || 'Lesson Invariants'}</strong> ({companionLevel} • {companionLanguage.toUpperCase()} • {companionAgeGroup})
                         </span>
-                        <span className="font-mono">Server-Side Sandboxed Inference</span>
+                        <span className="font-mono">Server-Side Streaming &amp; Guardrails</span>
                       </div>
                       <div className="flex items-center gap-2">
                         <input
@@ -1482,18 +1637,28 @@ export default function CourseLectureInterfacePage({
                           onKeyDown={(e) => {
                             if (e.key === 'Enter') handleSendCompanionQuery();
                           }}
-                          placeholder={`Ask a question about ${activeLesson?.title || 'this lesson'}...`}
+                          disabled={isGeneratingCompanion}
+                          placeholder={companionLocaleStrings.askPlaceholder}
                           className="flex-1 bg-surface-subtle border border-surface-border rounded-lg px-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-brand-indigo-500"
                         />
-                        <Button
-                          size="sm"
-                          variant="primary"
-                          onClick={() => handleSendCompanionQuery()}
-                          isLoading={isGeneratingCompanion}
-                          disabled={!companionInput.trim()}
-                        >
-                          <Send className="w-3.5 h-3.5" />
-                        </Button>
+                        {isGeneratingCompanion ? (
+                          <Button
+                            size="sm"
+                            variant="secondary"
+                            onClick={handleStopCompanionStream}
+                          >
+                            <Square className="w-3.5 h-3.5" />
+                          </Button>
+                        ) : (
+                          <Button
+                            size="sm"
+                            variant="primary"
+                            onClick={() => handleSendCompanionQuery()}
+                            disabled={!companionInput.trim()}
+                          >
+                            <Send className="w-3.5 h-3.5" />
+                          </Button>
+                        )}
                       </div>
                     </div>
                   </Card>

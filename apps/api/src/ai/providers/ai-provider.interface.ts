@@ -1,4 +1,11 @@
-import type { AiQueryRequestDto, AiQueryResponseDto, AssessmentCheckRequestDto, AssessmentCheckResponseDto, SubmitAssessmentRequestDto, SubmitAssessmentResultDto } from '@platform/types';
+import type {
+  AiQueryRequestDto,
+  AiQueryResponseDto,
+  AssessmentCheckRequestDto,
+  AssessmentCheckResponseDto,
+  SubmitAssessmentRequestDto,
+  SubmitAssessmentResultDto,
+} from '@platform/types';
 
 export interface AiProvider {
   readonly providerName: string;
@@ -7,6 +14,12 @@ export interface AiProvider {
   generateExplanation(
     request: AiQueryRequestDto,
     learnerLevel: string
+  ): Promise<AiQueryResponseDto>;
+
+  generateExplanationStream?(
+    request: AiQueryRequestDto,
+    learnerLevel: string,
+    onDelta: (chunk: string) => void
   ): Promise<AiQueryResponseDto>;
 
   generateAssessment(

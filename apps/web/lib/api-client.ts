@@ -1,5 +1,5 @@
 import { getSupabaseBrowserClient } from './supabase/client';
-import type { ApiResponse } from '@platform/types';
+import type { ApiResponse, AiStreamChunk } from '@platform/types';
 
 export class ApiError extends Error {
   constructor(
@@ -17,21 +17,15 @@ export interface ApiClientOptions extends RequestInit {
   skipAuth?: boolean;
 }
 
-/**
- * Standardized, secure API client for communicating with the NestJS backend.
- * Automatically injects the active Supabase JWT Bearer token into headers.
- * Catches 401 and 403 errors cleanly without infinite retry loops.
- */
-export async function apiClient<T = unknown>(
-  endpoint: string,
-  options: ApiClientOptions = {}
-): Promise<ApiResponse<T>> {
-  const { skipAuth = false, headers: customHeaders, ...fetchOptions } = options;
-
+async function buildApiHeaders(
+  skipAuth: boolean,
+  customHeaders?: HeadersInit
+): Promise<Headers> {
   const headers = new Headers(customHeaders || {});
-  headers.set('Content-Type', 'application/json');
+  if (!headers.has('Content-Type')) {
+    headers.set('Content-Type', 'application/json');
+  }
 
-  // Inject Supabase JWT access token if authenticated
   if (!skipAuth && typeof window !== 'undefined') {
     try {
       const supabase = getSupabaseBrowserClient();
@@ -47,16 +41,33 @@ export async function apiClient<T = unknown>(
     }
   }
 
-  // Format request URL through Next.js proxy rewrite or direct API host
+  return headers;
+}
+
+function resolveApiUrl(endpoint: string): string {
   const cleanEndpoint = endpoint.replace(/^\/+/, '');
   const path =
     cleanEndpoint.startsWith('api/') || cleanEndpoint.startsWith('health')
       ? cleanEndpoint
       : `api/v1/${cleanEndpoint}`;
 
-  const url = cleanEndpoint.startsWith('http')
+  return cleanEndpoint.startsWith('http')
     ? cleanEndpoint
     : `/backend-api/${path}`;
+}
+
+/**
+ * Standardized, secure API client for communicating with the NestJS backend.
+ * Automatically injects the active Supabase JWT Bearer token into headers.
+ * Catches 401 and 403 errors cleanly without infinite retry loops.
+ */
+export async function apiClient<T = unknown>(
+  endpoint: string,
+  options: ApiClientOptions = {}
+): Promise<ApiResponse<T>> {
+  const { skipAuth = false, headers: customHeaders, ...fetchOptions } = options;
+  const headers = await buildApiHeaders(skipAuth, customHeaders);
+  const url = resolveApiUrl(endpoint);
 
   try {
     const response = await fetch(url, {
@@ -130,5 +141,78 @@ export async function apiClient<T = unknown>(
       'NETWORK_ERROR',
       (error as Error).message || 'Failed to communicate with Learnova backend service.'
     );
+  }
+}
+
+/**
+ * Consumes Server-Sent Events (`text/event-stream`) from Learnova AI streaming endpoints.
+ */
+export async function streamAiClient(
+  endpoint: string,
+  body: unknown,
+  onChunk: (chunk: AiStreamChunk) => void,
+  signal?: AbortSignal
+): Promise<void> {
+  const headers = await buildApiHeaders(false, {
+    Accept: 'text/event-stream',
+  });
+  const url = resolveApiUrl(endpoint);
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(body),
+    signal,
+  });
+
+  if (response.status === 401) {
+    throw new ApiError(
+      401,
+      'UNAUTHORIZED',
+      'Sign in required to interact with the AI Learning Companion.'
+    );
+  }
+
+  if (response.status === 403) {
+    const errJson = await response.json().catch(() => ({}));
+    throw new ApiError(
+      403,
+      errJson.code || 'FORBIDDEN',
+      errJson.message || 'You do not have access to this course context.'
+    );
+  }
+
+  if (!response.ok || !response.body) {
+    const errJson = await response.json().catch(() => ({}));
+    throw new ApiError(
+      response.status || 500,
+      errJson.code || 'STREAM_ERROR',
+      errJson.message || `Streaming request failed (${response.status}).`
+    );
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+
+    const lines = buffer.split(/\r?\n/);
+    buffer = lines.pop() || '';
+
+    for (const line of lines) {
+      if (!line.startsWith('data:')) continue;
+      const payload = line.slice(5).trim();
+      if (!payload) continue;
+      try {
+        const parsed = JSON.parse(payload) as AiStreamChunk;
+        onChunk(parsed);
+      } catch {
+        // Ignore partial non-JSON lines
+      }
+    }
   }
 }

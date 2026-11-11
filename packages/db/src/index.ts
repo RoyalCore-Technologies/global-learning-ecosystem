@@ -38,6 +38,7 @@ export const AI_TABLES = {
   AI_LEARNING_MESSAGES: 'ai_learning_messages',
   AI_ASSESSMENTS: 'ai_assessments',
   LEARNER_CONCEPT_MASTERY: 'learner_concept_mastery',
+  AI_SAFETY_EVENTS: 'ai_safety_events',
 } as const;
 
 export const STORAGE_BUCKETS = {

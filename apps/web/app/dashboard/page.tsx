@@ -8,8 +8,11 @@ import { Badge } from '@/components/ui/badge';
 import { Avatar } from '@/components/ui/avatar';
 import { Skeleton, EmptyState } from '@/components/ui/feedback';
 import { getSupabaseBrowserClient } from '@/lib/supabase/client';
-import { apiClient } from '@/lib/api-client';
-import type { CourseEnrollment } from '@platform/types';
+import { apiClient, streamAiClient, ApiError } from '@/lib/api-client';
+import type {
+  CourseEnrollment,
+  AdaptiveRecommendationsDto,
+} from '@platform/types';
 import {
   Sparkles,
   BookOpen,
@@ -23,6 +26,8 @@ import {
   Send,
   MessageSquare,
   GraduationCap,
+  AlertCircle,
+  Target,
 } from 'lucide-react';
 import Link from 'next/link';
 
@@ -32,16 +37,21 @@ export default function DashboardPage() {
   const [aiPrompt, setAiPrompt] = useState('');
   const [isAskingAi, setIsAskingAi] = useState(false);
   const [aiResponse, setAiResponse] = useState<string | null>(null);
+  const [aiIsFallback, setAiIsFallback] = useState<boolean>(false);
+  const [aiError, setAiError] = useState<string | null>(null);
 
-  // Enrollments State
+  // Enrollments & Adaptive Learning State
   const [enrollments, setEnrollments] = useState<CourseEnrollment[]>([]);
   const [isLoadingEnrollments, setIsLoadingEnrollments] = useState<boolean>(true);
+  const [adaptiveData, setAdaptiveData] = useState<AdaptiveRecommendationsDto | null>(null);
 
   useEffect(() => {
+    let isLoggedIn = false;
     try {
       const supabase = getSupabaseBrowserClient();
       supabase.auth.getSession().then(({ data: { session } }) => {
         if (session?.user) {
+          isLoggedIn = true;
           const name =
             (session.user.user_metadata?.display_name as string) ||
             (session.user.user_metadata?.full_name as string) ||
@@ -50,6 +60,14 @@ export default function DashboardPage() {
           setUserName(name);
           const role = (session.user.app_metadata?.role as string) || 'STUDENT';
           setUserRole(role);
+
+          apiClient<AdaptiveRecommendationsDto>('ai/adaptive/recommendations')
+            .then((res) => {
+              if (res.success && res.data) {
+                setAdaptiveData(res.data);
+              }
+            })
+            .catch(() => {});
         }
       });
     } catch {
@@ -74,19 +92,52 @@ export default function DashboardPage() {
     }
 
     loadEnrollments();
+    void isLoggedIn;
   }, []);
 
-  const handleAskAi = (e: React.FormEvent) => {
+  const handleAskAi = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!aiPrompt.trim()) return;
-    setIsAskingAi(true);
+    const query = aiPrompt.trim();
+    if (!query || isAskingAi) return;
 
-    setTimeout(() => {
-      setIsAskingAi(false);
-      setAiResponse(
-        `Concept Explanation for "${aiPrompt}":\nIn distributed systems, the Raft consensus algorithm decomposes state-machine replication into leader election, log replication, and safety. Unlike Paxos, Raft is structured specifically for human interpretability and mathematical formalization.`
+    setIsAskingAi(true);
+    setAiError(null);
+    setAiResponse('');
+    setAiIsFallback(false);
+
+    try {
+      await streamAiClient(
+        'ai/query/stream',
+        {
+          query,
+          mode: 'EXPLANATION',
+          context: {
+            learner_level: 'INTERMEDIATE',
+            course_id: enrollments[0]?.course_id,
+          },
+        },
+        (chunk) => {
+          if (chunk.event === 'delta' && chunk.delta) {
+            setAiResponse((prev) => (prev || '') + chunk.delta);
+          } else if (chunk.event === 'complete' && chunk.response) {
+            setAiResponse(chunk.response.text);
+            setAiIsFallback(!!chunk.response.is_fallback);
+          } else if (chunk.event === 'error') {
+            throw new ApiError(500, 'STREAM_ERROR', chunk.error || 'AI service unavailable.');
+          }
+        }
       );
-    }, 900);
+    } catch (err) {
+      setAiResponse(null);
+      const apiErr = err as ApiError;
+      setAiError(
+        apiErr?.statusCode === 401
+          ? 'Sign in to query the server-side AI Learning Core.'
+          : apiErr?.message || 'AI Learning Core is currently unavailable.'
+      );
+    } finally {
+      setIsAskingAi(false);
+    }
   };
 
   const primaryEnrollment = enrollments[0];
@@ -228,7 +279,14 @@ export default function DashboardPage() {
                   </CardDescription>
                 </div>
               </div>
-              <Badge variant="ai">Cognitive Scaffolding</Badge>
+              <div className="flex items-center gap-2">
+                <Link href="/ai-assistant">
+                  <Button size="sm" variant="secondary" className="text-xs">
+                    Open Full Studio
+                  </Button>
+                </Link>
+                <Badge variant="ai">Cognitive Scaffolding</Badge>
+              </div>
             </div>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -245,18 +303,54 @@ export default function DashboardPage() {
                 variant="ai"
                 size="md"
                 isLoading={isAskingAi}
+                disabled={!aiPrompt.trim()}
                 rightIcon={<Send className="w-3.5 h-3.5" />}
               >
                 Inquire
               </Button>
             </form>
 
+            {aiError && (
+              <div className="p-3 rounded-xl bg-rose-950/30 border border-rose-500/40 text-xs text-rose-300 flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
+                <span>{aiError}</span>
+              </div>
+            )}
+
             {aiResponse && (
-              <div className="p-4 rounded-xl bg-brand-violet-950/30 border border-brand-violet-500/30 text-xs text-slate-200 whitespace-pre-line leading-relaxed animate-in fade-in">
-                <div className="flex items-center gap-1.5 text-brand-violet-300 font-bold mb-2">
-                  <Sparkles className="w-3.5 h-3.5" /> Learnova AI Cognitive Tutor
+              <div className="p-4 rounded-xl bg-brand-violet-950/30 border border-brand-violet-500/30 text-xs text-slate-200 whitespace-pre-line leading-relaxed">
+                <div className="flex flex-wrap items-center justify-between gap-2 mb-2 pb-1.5 border-b border-brand-violet-500/20">
+                  <div className="flex items-center gap-1.5 text-brand-violet-300 font-bold">
+                    <Sparkles className="w-3.5 h-3.5" /> Learnova AI Cognitive Tutor
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    {aiIsFallback && (
+                      <Badge variant="warning" className="text-[10px]">
+                        Offline Academic Fallback
+                      </Badge>
+                    )}
+                    <Badge variant="secondary" className="text-[10px]">
+                      AI-Generated Guidance
+                    </Badge>
+                  </div>
                 </div>
                 {aiResponse}
+              </div>
+            )}
+
+            {adaptiveData && (
+              <div className="pt-2 border-t border-surface-border/60 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+                <div className="flex items-center gap-2 text-slate-300">
+                  <Target className="w-4 h-4 text-brand-cyan-400 shrink-0" />
+                  <span>
+                    SM-2 Mastery: <strong>{adaptiveData.overall_mastery_percentage}%</strong> across{' '}
+                    <strong>{adaptiveData.total_concepts_tracked}</strong> tracked concepts (
+                    {adaptiveData.due_reviews.length} reviews due)
+                  </span>
+                </div>
+                <Link href="/ai-assistant" className="text-brand-cyan-400 hover:text-brand-cyan-300 font-semibold">
+                  View Adaptive Schedule &rarr;
+                </Link>
               </div>
             )}
           </CardContent>

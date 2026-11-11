@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { Course, CourseEnrollment, CourseModule, Lesson } from '@platform/types';
 import { UserRole } from '@platform/types';
 import { apiClient, ApiError } from '../../lib/api-client.js';
+import { getAiLocaleConfig, AI_SUPPORTED_LANGUAGES, AI_AGE_GROUPS } from '../../lib/i18n/ai-locales.js';
 
 describe('Learnova Course Catalog & Syllabus UI Integration (M3.4)', () => {
   beforeEach(() => {
@@ -609,6 +610,53 @@ describe('Learnova Course Catalog & Syllabus UI Integration (M3.4)', () => {
       expect(res.data?.overall_mastery_percentage).toBe(85);
       expect(res.data?.due_reviews[0].review_interval_days).toBe(6);
       expect(res.data?.recommended_actions[0].type).toBe('PRACTICE_ASSESSMENT');
+    });
+  });
+
+  describe('Multilingual Readiness, Age Calibration & Session Persistence (M5.5)', () => {
+    it('supports localized UI strings and RTL direction for Arabic', () => {
+      const arLocale = getAiLocaleConfig('ar');
+      expect(arLocale.option.dir).toBe('rtl');
+      expect(arLocale.strings.companionTitle).toContain('الذكاء الاصطناعي');
+
+      const teLocale = getAiLocaleConfig('te');
+      expect(teLocale.option.dir).toBe('ltr');
+      expect(teLocale.strings.aiNoticeBadge).toContain('AI');
+
+      const fallbackLocale = getAiLocaleConfig('unknown-xx');
+      expect(fallbackLocale.option.code).toBe('en');
+      expect(AI_SUPPORTED_LANGUAGES.length).toBeGreaterThanOrEqual(10);
+      expect(AI_AGE_GROUPS.map((g) => g.id)).toEqual(['CHILD', 'TEEN', 'ADULT']);
+    });
+
+    it('loads persisted course & lesson AI session history cleanly', async () => {
+      globalThis.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          success: true,
+          data: [
+            {
+              id: 'sess-persisted-1',
+              user_id: 'user-1',
+              course_id: 'c-1',
+              lesson_id: 'les-1',
+              mode: 'SOCRATIC',
+              learner_level: 'INTERMEDIATE',
+              language: 'es',
+              title: 'Consenso en Raft',
+              created_at: '2026-11-11T00:00:00Z',
+              updated_at: '2026-11-11T00:00:00Z',
+            },
+          ],
+        }),
+      });
+
+      const res = await apiClient<any[]>('ai/sessions?courseId=c-1&lessonId=les-1');
+      expect(res.success).toBe(true);
+      expect(res.data).toHaveLength(1);
+      expect(res.data[0].id).toBe('sess-persisted-1');
+      expect(res.data[0].language).toBe('es');
     });
   });
 });

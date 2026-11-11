@@ -4,6 +4,8 @@ import type {
   AiQueryResponseDto,
   AssessmentCheckResponseDto,
   SubmitAssessmentResultDto,
+  AiStreamChunk,
+  AiLearningSessionDetail,
 } from './ai.js';
 
 describe('Learnova M5 AI Learning Companion Types', () => {
@@ -101,5 +103,45 @@ describe('Learnova M5 AI Learning Companion Types', () => {
     expect(masteryRecord.status).toBe('MASTERED');
     expect(masteryRecord.mastery_score).toBe(0.95);
     expect(masteryRecord.review_interval_days).toBe(7);
+  });
+
+  it('validates streaming, fallback attribution, multilingual, and session persistence contracts (M5.5)', () => {
+    const chunk: AiStreamChunk = {
+      event: 'delta',
+      session_id: 'sess-1',
+      delta: 'Majority quorums intersect...',
+    };
+    expect(chunk.event).toBe('delta');
+
+    const sessionDetail: AiLearningSessionDetail = {
+      id: 'sess-1',
+      user_id: 'user-1',
+      course_id: 'course-1',
+      lesson_id: 'lesson-1',
+      mode: 'SOCRATIC',
+      learner_level: 'INTERMEDIATE',
+      language: 'es',
+      title: 'Consenso Distribuido',
+      created_at: '2026-11-11T00:00:00Z',
+      updated_at: '2026-11-11T00:00:00Z',
+      messages: [
+        {
+          id: 'msg-1',
+          sender: 'ai',
+          text: 'Explicación socrática...',
+          provider: 'learnova-academic-engine',
+          model: 'local-academic-grounding',
+          is_fallback: true,
+          fallback_reason: 'GEMINI_API_KEY not configured',
+          language: 'es',
+          safety_status: 'SAFE',
+          timestamp: '2026-11-11T00:00:00Z',
+        },
+      ],
+    };
+
+    expect(sessionDetail.language).toBe('es');
+    expect(sessionDetail.messages[0].is_fallback).toBe(true);
+    expect(sessionDetail.messages[0].safety_status).toBe('SAFE');
   });
 });

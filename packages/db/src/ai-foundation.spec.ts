@@ -14,6 +14,7 @@ describe('Learnova Milestone 5.2: AI Learning Foundation Schema & RLS (PGlite En
   const migration006 = fs.readFileSync(path.join(migrationsDir, '006_creator_community.sql'), 'utf8');
   const migration007 = fs.readFileSync(path.join(migrationsDir, '007_ai_learning_foundation.sql'), 'utf8');
   const migration008 = fs.readFileSync(path.join(migrationsDir, '008_adaptive_learning.sql'), 'utf8');
+  const migration009 = fs.readFileSync(path.join(migrationsDir, '009_ai_safety_and_localization.sql'), 'utf8');
 
   const studentUser1 = '11111111-1111-1111-1111-111111111111';
   const studentUser2 = '22222222-2222-2222-2222-222222222222';
@@ -78,7 +79,7 @@ describe('Learnova Milestone 5.2: AI Learning Foundation Schema & RLS (PGlite En
       $$ LANGUAGE sql IMMUTABLE;
     `);
 
-    // 2. Execute all migrations 001 - 007
+    // 2. Execute all migrations 001 - 009
     await db.exec(migration001);
     await db.exec(migration002);
     await db.exec(migration003);
@@ -87,6 +88,13 @@ describe('Learnova Milestone 5.2: AI Learning Foundation Schema & RLS (PGlite En
     await db.exec(migration006);
     await db.exec(migration007);
     await db.exec(migration008);
+    await db.exec(migration009);
+
+    // Grant table privileges to authenticated role for real RLS enforcement testing
+    await db.exec(`
+      GRANT USAGE ON SCHEMA public TO authenticated;
+      GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO authenticated;
+    `);
 
     // Seed test users
     await db.exec(`
@@ -271,15 +279,71 @@ describe('Learnova Milestone 5.2: AI Learning Foundation Schema & RLS (PGlite En
       expect(updateRes.rows[0].repetition_count).toBe(0);
     });
 
-    it('enforces learner privacy: student 2 cannot see student 1 mastery records', async () => {
-      // Evaluate privacy expression
-      const evalStudent2 = await db.query<{ allowed: boolean }>(`
-        SELECT EXISTS (
-          SELECT 1 FROM public.learner_concept_mastery m
-          WHERE m.concept_tag = 'quorum-intersection' AND (m.user_id = '${studentUser2}' OR public.is_platform_admin('${studentUser2}'))
-        ) as allowed;
+    it('enforces learner privacy: student 2 cannot see student 1 mastery records under active RLS', async () => {
+      // Student 1 can see their own mastery record under authenticated role
+      await db.exec('BEGIN;');
+      await db.exec(`SET LOCAL ROLE authenticated;`);
+      await db.exec(`SET LOCAL request.jwt.claim.sub = '${studentUser1}';`);
+      const s1Rows = await db.query(`SELECT * FROM public.learner_concept_mastery;`);
+      expect(s1Rows.rows.length).toBe(1);
+      await db.exec('COMMIT;');
+
+      // Student 2 sees 0 rows on sessions, messages, assessments, and mastery under active RLS
+      await db.exec('BEGIN;');
+      await db.exec(`SET LOCAL ROLE authenticated;`);
+      await db.exec(`SET LOCAL request.jwt.claim.sub = '${studentUser2}';`);
+
+      const s2Sessions = await db.query(`SELECT * FROM public.ai_learning_sessions;`);
+      const s2Messages = await db.query(`SELECT * FROM public.ai_learning_messages;`);
+      const s2Assessments = await db.query(`SELECT * FROM public.ai_assessments;`);
+      const s2Mastery = await db.query(`SELECT * FROM public.learner_concept_mastery;`);
+
+      expect(s2Sessions.rows.length).toBe(0);
+      expect(s2Messages.rows.length).toBe(0);
+      expect(s2Assessments.rows.length).toBe(0);
+      expect(s2Mastery.rows.length).toBe(0);
+
+      // Student 2 cannot insert a mastery record spoofing student 1's user_id
+      await expect(
+        db.exec(`
+          INSERT INTO public.learner_concept_mastery (user_id, concept_tag, mastery_score)
+          VALUES ('${studentUser1}', 'spoofed-concept', 1.0);
+        `)
+      ).rejects.toThrow();
+      await db.exec('ROLLBACK;');
+    });
+  });
+
+  describe('AI Safety Events & Multilingual Support (009)', () => {
+    it('supports multilingual session metadata and enforces ai_safety_events RLS', async () => {
+      await db.exec('BEGIN;');
+      await db.exec(`SET LOCAL ROLE authenticated;`);
+      await db.exec(`SET LOCAL request.jwt.claim.sub = '${studentUser1}';`);
+
+      const langSession = await db.query<{ id: string; language: string; age_group: string }>(`
+        INSERT INTO public.ai_learning_sessions (user_id, mode, learner_level, language, age_group, title)
+        VALUES ('${studentUser1}', 'SOCRATIC', 'BEGINNER', 'es', 'TEEN', 'Sesión en Español')
+        RETURNING id, language, age_group;
       `);
-      expect(evalStudent2.rows[0].allowed).toBe(false);
+      expect(langSession.rows[0].language).toBe('es');
+      expect(langSession.rows[0].age_group).toBe('TEEN');
+
+      const safetyEv = await db.query<{ id: string; category: string; action_taken: string }>(`
+        INSERT INTO public.ai_safety_events (user_id, session_id, category, severity, action_taken)
+        VALUES ('${studentUser1}', '${langSession.rows[0].id}', 'PROMPT_INJECTION', 'HIGH', 'BLOCKED')
+        RETURNING id, category, action_taken;
+      `);
+      expect(safetyEv.rows[0].category).toBe('PROMPT_INJECTION');
+      expect(safetyEv.rows[0].action_taken).toBe('BLOCKED');
+      await db.exec('COMMIT;');
+
+      // Student 2 cannot view Student 1 safety events under active RLS
+      await db.exec('BEGIN;');
+      await db.exec(`SET LOCAL ROLE authenticated;`);
+      await db.exec(`SET LOCAL request.jwt.claim.sub = '${studentUser2}';`);
+      const s2Events = await db.query(`SELECT * FROM public.ai_safety_events;`);
+      expect(s2Events.rows.length).toBe(0);
+      await db.exec('COMMIT;');
     });
   });
 });

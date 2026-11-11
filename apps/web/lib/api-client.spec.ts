@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { apiClient, ApiError } from './api-client.js';
+import { apiClient, streamAiClient, ApiError } from './api-client.js';
 
 describe('Learnova API Client (Authenticated Transport)', () => {
   beforeEach(() => {
@@ -54,5 +54,43 @@ describe('Learnova API Client (Authenticated Transport)', () => {
       statusCode: 403,
       code: 'FORBIDDEN',
     });
+  });
+
+  it('streams SSE AI chunks cleanly and emits parsed events', async () => {
+    const sse =
+      'data: {"event":"session","session_id":"s-1"}\n\n' +
+      'data: {"event":"delta","delta":"Hello "}\n\n' +
+      'data: {"event":"delta","delta":"Learner"}\n\n' +
+      'data: {"event":"complete","session_id":"s-1"}\n\n';
+
+    const body = new ReadableStream({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode(sse));
+        controller.close();
+      },
+    });
+
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      body,
+    });
+
+    const received: any[] = [];
+    await streamAiClient('ai/query/stream', { query: 'hi' }, (chunk) => received.push(chunk));
+
+    expect(received.map((c) => c.event)).toEqual(['session', 'delta', 'delta', 'complete']);
+    expect(received[1].delta + received[2].delta).toBe('Hello Learner');
+  });
+
+  it('throws ApiError 401 when streaming without valid auth', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 401,
+    });
+
+    await expect(
+      streamAiClient('ai/query/stream', { query: 'hi' }, () => {})
+    ).rejects.toMatchObject({ statusCode: 401, code: 'UNAUTHORIZED' });
   });
 });

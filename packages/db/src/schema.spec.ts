@@ -137,6 +137,17 @@ describe('Learnova Database Migrations & Safety Suite', () => {
     expect(sql008).toContain('learner_mastery_select');
   });
 
+  it('verifies migration 009 implements safety events, multilingual metadata, and privacy RLS', () => {
+    const migration009Path = path.join(migrationsDir, '009_ai_safety_and_localization.sql');
+    expect(fs.existsSync(migration009Path)).toBe(true);
+
+    const sql009 = fs.readFileSync(migration009Path, 'utf8');
+    expect(sql009).toContain('ai_safety_events');
+    expect(sql009).toContain('age_group');
+    expect(sql009).toContain('is_fallback');
+    expect(sql009).toContain('ai_safety_events_select');
+  });
+
   it('guarantees zero payment card columns or sensitive secrets in monetization tables', () => {
     const sql002 = fs.readFileSync(migration002Path, 'utf8');
 

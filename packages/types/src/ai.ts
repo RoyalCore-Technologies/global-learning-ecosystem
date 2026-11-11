@@ -2,6 +2,18 @@ export type AiScaffoldingMode = 'SOCRATIC' | 'PROOF' | 'CODE_ANALYSIS' | 'MASTER
 
 export type LearnerLevel = 'BEGINNER' | 'INTERMEDIATE' | 'ADVANCED';
 
+export type SupportedLanguage = 'en' | 'es' | 'fr' | 'de' | 'hi' | 'te' | 'zh' | 'ar' | 'ja' | 'pt';
+
+export type LearningAgeGroup = 'CHILD' | 'TEEN' | 'ADULT';
+
+export type AiSafetyCategory =
+  | 'SAFE'
+  | 'PROMPT_INJECTION'
+  | 'UNSAFE_CONTENT'
+  | 'PII_REDACTED'
+  | 'ACADEMIC_DISHONESTY'
+  | 'AGE_RESTRICTED';
+
 export interface AiChatMessage {
   id: string;
   sender: 'user' | 'ai' | 'system';
@@ -16,6 +28,10 @@ export interface AiChatMessage {
   suggested_action?: string;
   provider?: string;
   model?: string;
+  is_fallback?: boolean;
+  fallback_reason?: string;
+  language?: string;
+  safety_status?: AiSafetyCategory;
   timestamp: string;
 }
 
@@ -28,6 +44,8 @@ export interface AiInteractionContext {
   lesson_title?: string;
   lesson_content?: string;
   learner_level?: LearnerLevel;
+  preferred_language?: string;
+  age_group?: LearningAgeGroup;
   code_context?: {
     language: string;
     starter_code?: string;
@@ -63,6 +81,10 @@ export interface AiQueryResponseDto {
   } | null;
   provider: string;
   model: string;
+  is_fallback?: boolean;
+  fallback_reason?: string;
+  language?: string;
+  safety_status?: AiSafetyCategory;
   created_at: string;
 }
 
@@ -89,6 +111,51 @@ export interface AssessmentCheckResponseDto {
   topic: string;
   level: LearnerLevel;
   questions: AssessmentQuestion[];
+  provider?: string;
+  model?: string;
+  is_fallback?: boolean;
+  fallback_reason?: string;
+  language?: string;
+  created_at: string;
+}
+
+export interface AiStreamChunk {
+  event: 'session' | 'delta' | 'complete' | 'error';
+  session_id?: string;
+  delta?: string;
+  response?: AiQueryResponseDto;
+  error?: string;
+}
+
+export interface AiLearningSessionSummary {
+  id: string;
+  user_id: string;
+  course_id?: string | null;
+  lesson_id?: string | null;
+  mode: AiScaffoldingMode;
+  learner_level: LearnerLevel;
+  language?: string;
+  title: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AiLearningSessionDetail extends AiLearningSessionSummary {
+  messages: AiChatMessage[];
+}
+
+export interface AiAssessmentSummary {
+  id: string;
+  course_id?: string | null;
+  lesson_id?: string | null;
+  topic: string;
+  level: LearnerLevel;
+  language?: string;
+  score: number | null;
+  total_questions: number;
+  percentage: number | null;
+  passed: boolean | null;
+  completed_at: string | null;
   created_at: string;
 }
 
